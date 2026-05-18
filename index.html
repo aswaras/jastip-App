@@ -21,7 +21,7 @@
             'fade-in-up': 'fadeInUp 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards',
             'fade-in': 'fadeIn 0.2s ease-out forwards',
             'pop': 'pop 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards',
-            'spin-slow': 'spin 2s linear infinite',
+            'spin-slow': 'spin 1.5s linear infinite',
           },
           keyframes: {
             fadeInUp: { '0%': { opacity: '0', transform: 'translateY(20px)' }, '100%': { opacity: '1', transform: 'translateY(0)' } },
@@ -68,37 +68,26 @@
 
     const App = () => {
 
+      // Deteksi Mode URL
       const urlParams = new URLSearchParams(window.location.search);
       const adminWaFromUrl = urlParams.get('admin');
       const isCustomerView = !!adminWaFromUrl;
 
-      // --- STATES ---
+      // --- STATES UMUM ---
       const [isAdminMode, setIsAdminMode] = useState(false);
       const [isPinModalOpen, setIsPinModalOpen] = useState(false);
       const [pinInput, setPinInput] = useState('');
       const [pinError, setPinError] = useState('');
+      const [isLoading, setIsLoading] = useState(false);
       
-      const [orders, setOrders] = useState(() => {
-        const saved = localStorage.getItem('jastip_orders');
-        return saved ? JSON.parse(saved) : [];
-      });
-      
-      // Auto-save local changes (Optimistic UI Backup)
-      useEffect(() => {
-        if(!isCustomerView) localStorage.setItem('jastip_orders', JSON.stringify(orders));
-      }, [orders, isCustomerView]);
-
-      // --- SYNC ENGINE STATES ---
-      const [syncStatus, setSyncStatus] = useState('idle'); // idle, syncing, error, offline
-      const [isRefreshing, setIsRefreshing] = useState(false);
-      const isSyncingRef = useRef(false);
-
+      const [orders, setOrders] = useState([]);
       const [alertData, setAlertData] = useState({ isOpen: false, message: '', title: '' });
       const [confirmData, setConfirmData] = useState({ isOpen: false, message: '', onConfirm: null });
 
       const showAlert = (message, title = 'Informasi') => setAlertData({ isOpen: true, message, title });
       const showConfirm = (message, onConfirm) => setConfirmData({ isOpen: true, message, onConfirm });
 
+      // --- PENGATURAN WA ADMIN ---
       const [adminWaNumber, setAdminWaNumber] = useState(() => {
         if (isCustomerView) return adminWaFromUrl;
         return localStorage.getItem('jastip_admin_wa') || "";
@@ -106,110 +95,56 @@
       const [isSettingOpen, setIsSettingOpen] = useState(false);
       const [tempWaNumber, setTempWaNumber] = useState(adminWaNumber);
 
+      // --- STATE CUSTOMER PREVIEW ---
       const [formData, setFormData] = useState({ name: '', address: '', request: '' });
       const [customerPreviewData, setCustomerPreviewData] = useState(null);
 
+      // --- STATE ADMIN PREVIEW NOTA ---
       const [isCostModalOpen, setIsCostModalOpen] = useState(false);
       const [selectedOrder, setSelectedOrder] = useState(null);
       const [costInput, setCostInput] = useState({ estimatedItemPrice: '', serviceFee: '' });
       const [adminPreviewData, setAdminPreviewData] = useState(null);
 
+      // --- STATE EDIT ORDER & KALKULATOR ---
+      const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+      const [editFormData, setEditFormData] = useState({ id: '', name: '', address: '', request: '' });
+      const [showCalculator, setShowCalculator] = useState(false);
+      const [calcValues, setCalcValues] = useState([{id: 1, price: ''}]);
 
       // ==========================================
-      // 🚀 BACKGROUND SYNC ENGINE (UPDATE FIX)
+      // FUNGSI SINKRONISASI DATABASE (NO-CORS)
       // ==========================================
-      
-      const processSyncQueue = async () => {
-        if (!navigator.onLine) {
-          setSyncStatus('offline');
-          return;
-        }
-        if (isSyncingRef.current || GOOGLE_SCRIPT_URL.includes("PASTE_URL")) return;
-        
-        let queue = JSON.parse(localStorage.getItem('jastip_sync_queue')) || [];
-        if (queue.length === 0) {
-          setSyncStatus('idle');
-          return;
-        }
-
-        isSyncingRef.current = true;
-        setSyncStatus('syncing');
-
-        // PERBAIKAN: Ambil item paling pertama di antrean
-        const item = queue[0];
-
-        try {
-          // PERBAIKAN: Gunakan mode 'no-cors' agar browser HP tidak memblokir koneksi secara diam-diam
-          await fetch(GOOGLE_SCRIPT_URL, {
-            method: 'POST',
-            mode: 'no-cors',
-            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-            body: JSON.stringify(item.payload),
-          });
-
-          // PERBAIKAN: Hapus item yang SPESIFIK berhasil dikirim berdasarkan ID
-          let currentQueue = JSON.parse(localStorage.getItem('jastip_sync_queue')) || [];
-          currentQueue = currentQueue.filter(q => q.id !== item.id);
-          localStorage.setItem('jastip_sync_queue', JSON.stringify(currentQueue));
-
-        } catch (e) {
-          console.error("Gagal sync ke database:", e);
-          setSyncStatus('error');
-        } finally {
-          isSyncingRef.current = false;
-          // Rekursif: Jika antrean masih ada sisa, jalankan lagi
-          const remainingQueue = JSON.parse(localStorage.getItem('jastip_sync_queue')) || [];
-          if(remainingQueue.length > 0) {
-            setTimeout(processSyncQueue, 1000);
-          } else {
-            setSyncStatus('idle');
-          }
-        }
+      const syncToServer = (payload) => {
+        if (GOOGLE_SCRIPT_URL.includes("PASTE_URL")) return;
+        fetch(GOOGLE_SCRIPT_URL, {
+          method: 'POST',
+          mode: 'no-cors', // Penting agar tidak diblokir browser
+          headers: { 'Content-Type': 'text/plain' },
+          body: JSON.stringify(payload)
+        }).catch(err => console.log("Background sync info:", err));
       };
 
-      const enqueueSync = (payload) => {
-        const queue = JSON.parse(localStorage.getItem('jastip_sync_queue')) || [];
-        queue.push({ id: Date.now(), payload });
-        localStorage.setItem('jastip_sync_queue', JSON.stringify(queue));
-        processSyncQueue(); // Trigger sync di background secara otomatis
-      };
-
-      // Listener deteksi sinyal balik (Otomatis sync pas dapat jaringan)
-      useEffect(() => {
-        window.addEventListener('online', processSyncQueue);
-        window.addEventListener('offline', () => setSyncStatus('offline'));
-        return () => {
-          window.removeEventListener('online', processSyncQueue);
-          window.removeEventListener('offline', () => setSyncStatus('offline'));
-        };
-      }, []);
-
-      // Ambil data (Admin)
       const fetchOrders = async () => {
-        if (GOOGLE_SCRIPT_URL.includes("PASTE_URL") || !navigator.onLine) return;
-        setIsRefreshing(true);
+        if (GOOGLE_SCRIPT_URL.includes("PASTE_URL")) return;
+        setIsLoading(true);
         try {
           const res = await fetch(GOOGLE_SCRIPT_URL);
           const data = await res.json();
           setOrders(data);
         } catch (error) {
-          console.log("Silently failed fetching updates.");
+          showAlert("Gagal mengambil data dari server. Pastikan URL Script benar.", "Koneksi Error");
         }
-        setIsRefreshing(false);
+        setIsLoading(false);
       };
 
       useEffect(() => {
-        if (isAdminMode) {
-           fetchOrders();
-           processSyncQueue(); // Jalankan antrean tertunda saat admin membuka dashboard
-        }
+        if (isAdminMode) fetchOrders();
       }, [isAdminMode]);
 
 
       // ==========================================
-      // ALUR PELANGGAN
+      // ALUR PELANGGAN: INPUT -> PREVIEW -> WA
       // ==========================================
-      
       const handleCustomerPreview = (e) => {
         e.preventDefault();
         if (GOOGLE_SCRIPT_URL.includes("PASTE_URL")) return showAlert("Aplikasi belum di-setup oleh admin.", "Error Sistem");
@@ -220,6 +155,7 @@
       };
 
       const submitCustomerOrder = () => {
+        setIsLoading(true);
         const newOrder = {
           id: customerPreviewData.id,
           customerName: customerPreviewData.name,
@@ -231,10 +167,9 @@
           date: new Date().toLocaleDateString('id-ID')
         };
 
-        // 1. Masukkan ke Antrean Sync Database (Optimistic)
-        enqueueSync({ action: 'create', ...newOrder });
+        // 1. Kirim ke Server
+        syncToServer({ action: 'create', ...newOrder });
 
-        // 2. Siapkan Pesan WA
         let message = `*PESANAN BARU - TITIP DONG!* 🛵💨\n\n`;
         message += `*ID:* ${newOrder.id}\n`;
         message += `*Nama:* ${newOrder.customerName}\n`;
@@ -242,24 +177,25 @@
         message += `*🛍️ PESANAN:*\n${newOrder.request}\n\n`;
         message += `Mohon info estimasi biayanya ya min.`;
 
-        // 3. Reset UI (Biar berasa tidak loading)
-        setFormData({ name: '', address: '', request: '' });
-        setCustomerPreviewData(null);
-        
-        // 4. PERBAIKAN: Beri jeda 800ms sebelum Redirect agar sinyal fetch ke server sempat keluar dari HP
+        // 2. Beri jeda 800ms agar fetch selesai, lalu redirect ke WA
         setTimeout(() => {
+          setIsLoading(false);
+          setFormData({ name: '', address: '', request: '' });
+          setCustomerPreviewData(null);
           window.location.href = `https://wa.me/${adminWaNumber}?text=${encodeURIComponent(message)}`;
         }, 800);
       };
 
 
       // ==========================================
-      // ALUR ADMIN
+      // ALUR ADMIN: LOGIN & PENGATURAN
       // ==========================================
-      
       const handleToggleMode = () => {
-        if (isAdminMode) setIsAdminMode(false);
-        else { setPinInput(''); setPinError(''); setIsPinModalOpen(true); }
+        if (isAdminMode) {
+           setIsAdminMode(false);
+        } else { 
+           setPinInput(''); setPinError(''); setIsPinModalOpen(true); 
+        }
       };
 
       const handlePinSubmit = (e) => {
@@ -308,6 +244,38 @@
         document.body.removeChild(textArea);
       };
 
+      // ==========================================
+      // ALUR ADMIN: EDIT ORDER & KALKULATOR
+      // ==========================================
+      const openEditModal = (order) => {
+        setEditFormData({ id: order.id, name: order.customerName, address: order.address, request: order.request });
+        setIsEditModalOpen(true);
+      };
+
+      const handleSaveEditOrder = (e) => {
+        e.preventDefault();
+        // Optimistic UI Update
+        setOrders(orders.map(o => o.id === editFormData.id ? { ...o, customerName: editFormData.name, address: editFormData.address, request: editFormData.request } : o));
+        // Sync ke server
+        syncToServer({ action: 'update_details', id: editFormData.id, customerName: editFormData.name, address: editFormData.address, request: editFormData.request });
+        
+        setIsEditModalOpen(false);
+        showAlert("Pesanan berhasil diperbarui.", "Berhasil");
+      };
+
+      const addCalcRow = () => setCalcValues([...calcValues, { id: Date.now(), price: '' }]);
+      const updateCalcVal = (id, val) => setCalcValues(calcValues.map(item => item.id === id ? { ...item, price: val } : item));
+      const removeCalcRow = (id) => setCalcValues(calcValues.filter(item => item.id !== id));
+      
+      const applyCalculator = () => {
+        const total = calcValues.reduce((sum, item) => sum + (parseInt(item.price) || 0), 0);
+        setCostInput({ ...costInput, estimatedItemPrice: total });
+        setShowCalculator(false);
+      };
+
+      // ==========================================
+      // ALUR ADMIN: PROSES NOTA & HAPUS
+      // ==========================================
       const openCostModal = (order) => {
         setSelectedOrder(order);
         setCostInput({ estimatedItemPrice: order.estimatedItemPrice || '', serviceFee: order.serviceFee || '' });
@@ -331,54 +299,43 @@
         notaMsg += `*TOTAL TAGIHAN : ${formatRupiah(totalTagihan)}*\n\n`;
         notaMsg += `Mohon balas *OKE* jika setuju agar kurir langsung jalan! 🛵💨`;
 
-        setAdminPreviewData({
-          order: selectedOrder, estPrice, srvFee, totalTagihan, notaMsg
-        });
-
+        setAdminPreviewData({ order: selectedOrder, estPrice, srvFee, totalTagihan, notaMsg });
         setIsCostModalOpen(false);
       };
 
       const submitAdminNota = () => {
         if (!adminPreviewData) return;
+        setIsLoading(true);
 
-        // 1. Optimistic UI Update (Langsung ganti di layar Admin seolah-olah instan)
-        setOrders(orders.map(order => 
-          order.id === adminPreviewData.order.id 
-            ? { ...order, estimatedItemPrice: adminPreviewData.estPrice, serviceFee: adminPreviewData.srvFee, status: "DIPROSES" } 
-            : order
-        ));
-
-        // 2. Masukkan ke Antrean Sync Database
-        enqueueSync({ 
-          action: 'update', 
-          id: adminPreviewData.order.id,
-          status: "DIPROSES",
-          estimatedItemPrice: adminPreviewData.estPrice,
-          serviceFee: adminPreviewData.srvFee
+        // Update UI
+        setOrders(orders.map(order => order.id === adminPreviewData.order.id ? { ...order, estimatedItemPrice: adminPreviewData.estPrice, serviceFee: adminPreviewData.srvFee, status: "DIPROSES" } : order));
+        
+        // Sync
+        syncToServer({ 
+          action: 'update', id: adminPreviewData.order.id, status: "DIPROSES",
+          estimatedItemPrice: adminPreviewData.estPrice, serviceFee: adminPreviewData.srvFee
         });
         
-        // 3. Reset Modal & Delay Redirect
         const notaUrl = `https://wa.me/?text=${encodeURIComponent(adminPreviewData.notaMsg)}`;
-        setAdminPreviewData(null);
-        setSelectedOrder(null);
         
-        // PERBAIKAN: Jeda aman 800ms
+        // Jeda 800ms lalu alihkan ke WA
         setTimeout(() => {
+          setIsLoading(false);
+          setAdminPreviewData(null);
+          setSelectedOrder(null);
           window.location.href = notaUrl;
         }, 800);
       };
 
       const handleCompleteOrder = (id) => {
-        // Optimistic UI Update
         setOrders(orders.map(o => o.id === id ? { ...o, status: "SELESAI" } : o));
-        enqueueSync({ action: 'update', id: id, status: "SELESAI" });
+        syncToServer({ action: 'update', id: id, status: "SELESAI" });
       };
 
       const handleDeleteOrder = (id) => {
         showConfirm("Hapus pesanan ini secara permanen dari Database?", () => {
-          // Optimistic UI Update
           setOrders(orders.filter(o => o.id !== id));
-          enqueueSync({ action: 'delete', id: id });
+          syncToServer({ action: 'delete', id: id });
         });
       };
 
@@ -392,26 +349,20 @@
       // ==========================================
       return (
         <div id="app-container" className="flex flex-col relative overflow-x-hidden text-slate-800">
+          
+          {isLoading && (
+            <div className="absolute inset-0 z-[200] bg-white/80 backdrop-blur-sm flex flex-col justify-center items-center">
+              <Icon name="loader-2" className="w-12 h-12 text-brand-500 animate-spin-slow mb-3 drop-shadow-md" />
+              <p className="text-brand-900 font-bold text-sm tracking-wide">Memproses...</p>
+            </div>
+          )}
 
-          {/* HEADER */}
           <header className="bg-gradient-to-r from-brand-600 to-brand-500 text-white shadow-lg sticky top-0 z-30">
             <div className="px-6 py-4 flex justify-between items-center">
               <div className="flex items-center gap-2.5">
-                <div className="bg-white/20 p-1.5 rounded-xl backdrop-blur-md">
-                  <Icon name="shopping-bag" className="w-5 h-5 text-white" />
-                </div>
+                <div className="bg-white/20 p-1.5 rounded-xl backdrop-blur-md"><Icon name="shopping-bag" className="w-5 h-5 text-white" /></div>
                 <h1 className="text-xl font-extrabold tracking-tight">TitipDong</h1>
-                
-                {/* Indikator Background Sync */}
-                {(!isCustomerView || isCustomerView) && (
-                  <div className="ml-1 opacity-80" title="Status Sinkronisasi">
-                    {syncStatus === 'syncing' && <Icon name="refresh-cw" className="w-3.5 h-3.5 animate-spin-slow" />}
-                    {syncStatus === 'offline' && <Icon name="wifi-off" className="w-3.5 h-3.5 text-amber-300" />}
-                    {syncStatus === 'error' && <Icon name="alert-circle" className="w-3.5 h-3.5 text-red-300" />}
-                  </div>
-                )}
               </div>
-              
               {!isCustomerView && (
                 <button onClick={handleToggleMode} className="p-2.5 bg-white/10 hover:bg-white/20 rounded-full transition shadow-inner backdrop-blur-md">
                   <Icon name={isAdminMode ? "log-out" : "user"} className="w-4 h-4"/>
@@ -423,11 +374,8 @@
           <main className="flex-1 pb-24">
             
             {isCustomerView ? (
-              // ==========================================
-              // TAMPILAN PELANGGAN
-              // ==========================================
+              // --- TAMPILAN PELANGGAN ---
               <div className="animate-fade-in-up">
-                
                 <div className="bg-brand-600 pb-10 pt-4 px-6 rounded-b-[2rem] shadow-md relative overflow-hidden">
                   <div className="absolute right-[-10%] top-[-10%] opacity-10"><Icon name="shopping-cart" className="w-48 h-48" /></div>
                   <h2 className="text-3xl font-black text-white leading-tight mb-2 relative z-10">Pesan<br/>Jastip Sekarang.</h2>
@@ -463,10 +411,8 @@
                           value={formData.request} onChange={(e) => setFormData({...formData, request: e.target.value})}></textarea>
                       </div>
                     </div>
-                    
                     <div className="pt-2">
-                      <button type="submit" 
-                        className="w-full bg-gradient-to-r from-brand-600 to-brand-500 text-white py-4 rounded-2xl font-bold flex justify-center items-center gap-2 hover:from-brand-700 hover:to-brand-600 transition shadow-[0_8px_20px_rgb(16,185,129,0.3)] text-base active:scale-95">
+                      <button type="submit" className="w-full bg-gradient-to-r from-brand-600 to-brand-500 text-white py-4 rounded-2xl font-bold flex justify-center items-center gap-2 hover:from-brand-700 hover:to-brand-600 transition shadow-[0_8px_20px_rgb(16,185,129,0.3)] text-base active:scale-95">
                         Lanjut Preview <Icon name="arrow-right" className="w-4 h-4" />
                       </button>
                     </div>
@@ -478,37 +424,23 @@
               </div>
 
             ) : !isAdminMode ? (
-              // HOMEPAGE ADMIN (BELUM LOGIN)
+              // --- HOMEPAGE ADMIN (BELUM LOGIN) ---
               <div className="animate-fade-in-up text-center mt-12 px-6">
-                <div className="w-24 h-24 bg-brand-50 text-brand-500 rounded-full flex items-center justify-center mx-auto mb-6 shadow-inner border border-brand-100">
-                   <Icon name="package-check" className="w-12 h-12"/>
-                </div>
+                <div className="w-24 h-24 bg-brand-50 text-brand-500 rounded-full flex items-center justify-center mx-auto mb-6 shadow-inner border border-brand-100"><Icon name="package-check" className="w-12 h-12"/></div>
                 <h2 className="text-2xl font-black text-slate-800 mb-2">Portal Admin Jastip</h2>
                 <p className="text-sm text-slate-500 mb-8 leading-relaxed">Aplikasi ini adalah dashboard operasional khusus kurir/admin. Silakan masuk untuk mengelola pesanan.</p>
-                <button onClick={() => { setPinInput(''); setPinError(''); setIsPinModalOpen(true); }} className="px-8 py-3.5 bg-slate-800 text-white font-bold rounded-2xl shadow-lg active:scale-95 transition">
-                  Login Admin
-                </button>
+                <button onClick={() => { setPinInput(''); setPinError(''); setIsPinModalOpen(true); }} className="px-8 py-3.5 bg-slate-800 text-white font-bold rounded-2xl shadow-lg active:scale-95 transition">Login Admin</button>
               </div>
 
             ) : (
-              // ==========================================
-              // TAMPILAN ADMIN (DASHBOARD)
-              // ==========================================
+              // --- DASHBOARD ADMIN ---
               <div className="animate-fade-in-up px-5 pt-2">
-                
-                {/* Panel Link Toko */}
                 <div className="bg-slate-800 text-white rounded-3xl p-5 mb-6 shadow-xl relative overflow-hidden">
-                  <div className="absolute right-0 top-0 opacity-10 scale-150 transform translate-x-4 -translate-y-4">
-                    <Icon name="share-2" className="w-32 h-32" />
-                  </div>
+                  <div className="absolute right-0 top-0 opacity-10 scale-150 transform translate-x-4 -translate-y-4"><Icon name="share-2" className="w-32 h-32" /></div>
                   <div className="flex justify-between items-start mb-1">
-                    <h3 className="font-bold text-xs text-slate-300 uppercase tracking-wider relative z-10">Link Toko Jastip Anda</h3>
-                    <button onClick={() => { setTempWaNumber(adminWaNumber); setIsSettingOpen(true); }} 
-                      className="p-2 bg-slate-700 hover:bg-slate-600 rounded-xl transition relative z-10 shadow-sm" title="Ubah Nomor WA">
-                      <Icon name="edit-3" className="w-3.5 h-3.5 text-brand-300"/>
-                    </button>
+                    <h3 className="font-bold text-xs text-slate-300 uppercase tracking-wider relative z-10">Link Toko Jastip</h3>
+                    <button onClick={() => { setTempWaNumber(adminWaNumber); setIsSettingOpen(true); }} className="p-2 bg-slate-700 hover:bg-slate-600 rounded-xl transition relative z-10 shadow-sm" title="Ubah Nomor WA"><Icon name="edit-3" className="w-3.5 h-3.5 text-brand-300"/></button>
                   </div>
-                  
                   <div className="bg-slate-900/60 p-3.5 rounded-xl border border-slate-700/50 mt-2 mb-4 overflow-hidden text-ellipsis whitespace-nowrap text-xs font-mono text-brand-300 relative z-10 shadow-inner">
                     {`https://${window.location.hostname}/?admin=${adminWaNumber}`}
                   </div>
@@ -517,7 +449,6 @@
                   </button>
                 </div>
 
-                {/* Dashboard Stats */}
                 <div className="grid grid-cols-2 gap-4 mb-6">
                   <div className="bg-white p-5 rounded-3xl shadow-sm border border-slate-100 flex flex-col justify-center">
                     <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5">Omset Selesai</p>
@@ -536,7 +467,7 @@
                 <div className="flex justify-between items-center mb-4 px-1">
                   <h3 className="font-bold text-slate-800 flex items-center gap-2"><Icon name="database" className="w-5 h-5 text-brand-500"/> Data Pesanan</h3>
                   <button onClick={fetchOrders} className="text-xs bg-brand-50 text-brand-600 px-3 py-1.5 rounded-lg font-bold border border-brand-100 active:bg-brand-100 flex items-center gap-1.5 shadow-sm transition">
-                    <Icon name={isRefreshing ? "loader-2" : "refresh-cw"} className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin-slow' : ''}`}/> Perbarui
+                    <Icon name="refresh-cw" className="w-3.5 h-3.5"/> Perbarui
                   </button>
                 </div>
 
@@ -553,7 +484,6 @@
                       <div className="p-5">
                         <h3 className="font-bold text-slate-800 text-lg mb-1">{order.customerName}</h3>
                         <p className="text-xs font-semibold text-slate-500 mb-4 flex items-start gap-1"><Icon name="map-pin" className="w-3.5 h-3.5 shrink-0 mt-0.5 text-brand-500" />{order.address}</p>
-                        
                         <div className="bg-slate-50 border border-slate-100 p-4 rounded-2xl text-sm font-medium text-slate-700 whitespace-pre-wrap leading-relaxed shadow-inner">
                           {order.request}
                         </div>
@@ -573,7 +503,7 @@
                       <div className="p-3 bg-slate-50/80 border-t flex gap-2">
                         {order.status === 'MENUNGGU' && (
                           <button onClick={() => openCostModal(order)} className="flex-1 bg-brand-600 text-white py-3 rounded-xl text-sm font-bold flex justify-center items-center gap-2 hover:bg-brand-700 transition">
-                            <Icon name="calculator" className="w-4 h-4"/> Input Harga & Nota
+                            <Icon name="calculator" className="w-4 h-4"/> Harga & Nota
                           </button>
                         )}
                         {order.status === 'DIPROSES' && (
@@ -581,6 +511,9 @@
                             <Icon name="check-circle" className="w-4 h-4"/> Tandai Selesai
                           </button>
                         )}
+                        <button onClick={() => openEditModal(order)} className="w-12 bg-white text-blue-500 hover:bg-blue-50 border rounded-xl flex items-center justify-center transition" title="Edit Pesanan">
+                          <Icon name="edit" className="w-4 h-4" />
+                        </button>
                         <button onClick={() => handleDeleteOrder(order.id)} className="w-12 bg-white text-slate-400 hover:text-red-500 hover:bg-red-50 border rounded-xl flex items-center justify-center transition" title="Hapus">
                           <Icon name="trash-2" className="w-4 h-4" />
                         </button>
@@ -600,14 +533,12 @@
           </main>
 
           {/* ==========================================
-              MODAL PREVIEW PELANGGAN
+              MODALS PELANGGAN (PREVIEW)
           ========================================== */}
           {customerPreviewData && (
             <div className="fixed inset-0 z-[150] flex items-end sm:items-center justify-center bg-slate-900/60 backdrop-blur-sm animate-fade-in p-0 sm:p-5">
               <div className="bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl w-full max-w-sm p-6 pb-8 sm:pb-6 animate-fade-in-up">
-                <div className="flex items-center justify-center w-14 h-14 bg-brand-50 text-brand-600 rounded-full mx-auto mb-4 border border-brand-100">
-                  <Icon name="file-check-2" className="w-7 h-7"/>
-                </div>
+                <div className="flex items-center justify-center w-14 h-14 bg-brand-50 text-brand-600 rounded-full mx-auto mb-4 border border-brand-100"><Icon name="file-check-2" className="w-7 h-7"/></div>
                 <h3 className="font-bold text-center text-xl text-slate-800 mb-1">Preview Pesanan</h3>
                 <p className="text-xs text-center font-medium text-slate-500 mb-6">Pastikan pesanan Anda sudah benar.</p>
                 
@@ -625,10 +556,9 @@
                     <p className="text-sm text-slate-700 whitespace-pre-wrap mt-1.5 font-medium leading-relaxed">{customerPreviewData.request}</p>
                   </div>
                 </div>
-
                 <div className="flex gap-2">
                   <button onClick={() => setCustomerPreviewData(null)} className="flex-[0.8] py-3.5 bg-slate-100 text-slate-600 font-bold rounded-2xl active:bg-slate-200 transition">Batal</button>
-                  <button onClick={submitCustomerOrder} className="flex-[1.2] py-3.5 bg-brand-600 text-white font-bold rounded-2xl flex justify-center items-center gap-2 active:scale-95 transition shadow-md shadow-brand-500/30">
+                  <button onClick={submitCustomerOrder} className="flex-[1.2] py-3.5 bg-brand-600 text-white font-bold rounded-2xl flex justify-center items-center gap-2 active:scale-95 transition shadow-md">
                     Kirim ke WA <Icon name="send" className="w-4 h-4"/>
                   </button>
                 </div>
@@ -636,17 +566,13 @@
             </div>
           )}
 
-
           {/* ==========================================
               MODAL PREVIEW NOTA ADMIN
           ========================================== */}
           {adminPreviewData && (
             <div className="fixed inset-0 z-[150] flex items-end sm:items-center justify-center bg-slate-900/60 backdrop-blur-sm animate-fade-in p-0 sm:p-5">
               <div className="bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl w-full max-w-sm p-6 pb-8 sm:pb-6 animate-fade-in-up border-t-8 border-brand-500 relative">
-                <div className="absolute top-0 right-6 w-8 h-10 bg-brand-500 shadow-sm rounded-b flex items-end justify-center pb-2">
-                  <Icon name="receipt" className="w-4 h-4 text-white"/>
-                </div>
-                
+                <div className="absolute top-0 right-6 w-8 h-10 bg-brand-500 shadow-sm rounded-b flex items-end justify-center pb-2"><Icon name="receipt" className="w-4 h-4 text-white"/></div>
                 <h3 className="font-bold text-xl text-slate-800 mt-2 mb-1">Preview Nota</h3>
                 <p className="text-xs font-medium text-slate-500 mb-5">Untuk: {adminPreviewData.order.customerName}</p>
 
@@ -664,111 +590,87 @@
                     <span className="font-black text-2xl text-brand-600">{formatRupiah(adminPreviewData.totalTagihan)}</span>
                   </div>
                 </div>
-
                 <div className="flex gap-2">
-                  <button onClick={() => { setAdminPreviewData(null); setIsCostModalOpen(true); }} className="flex-[0.8] py-3.5 bg-slate-100 text-slate-600 font-bold rounded-2xl active:bg-slate-200 transition">Kembali</button>
-                  <button onClick={submitAdminNota} className="flex-[1.2] py-3.5 bg-brand-600 text-white font-bold rounded-2xl flex justify-center items-center gap-2 active:scale-95 transition shadow-lg shadow-brand-500/30">
+                  <button onClick={() => { setAdminPreviewData(null); setIsCostModalOpen(true); }} className="flex-[0.8] py-3.5 bg-slate-100 text-slate-600 font-bold rounded-2xl active:bg-slate-200">Kembali</button>
+                  <button onClick={submitAdminNota} className="flex-[1.2] py-3.5 bg-brand-600 text-white font-bold rounded-2xl flex justify-center items-center gap-2 active:scale-95 transition shadow-lg">
                     Kirim WA <Icon name="share" className="w-4 h-4"/>
                   </button>
                 </div>
-                <p className="text-[10px] font-medium text-center text-slate-400 mt-3 px-4">Tindakan ini akan mengupdate status & membuka fitur Send To WhatsApp.</p>
               </div>
             </div>
           )}
-
 
           {/* ==========================================
-              MODALS LAINNYA
+              MODAL EDIT ORDER (ADMIN)
           ========================================== */}
-          
-          {/* Custom Alert */}
-          {alertData.isOpen && (
-            <div className="fixed inset-0 z-[300] flex items-center justify-center p-5 bg-slate-900/50 backdrop-blur-sm animate-fade-in">
-              <div className="bg-white rounded-3xl w-full max-w-xs p-6 shadow-2xl animate-pop text-center border-t-4 border-brand-500">
-                <h3 className="font-bold text-lg text-slate-800 mb-2">{alertData.title}</h3>
-                <p className="text-sm font-medium text-slate-500 mb-6 leading-relaxed">{alertData.message}</p>
-                <button onClick={() => setAlertData({...alertData, isOpen: false})} className="w-full py-3.5 bg-brand-600 text-white font-bold rounded-2xl active:bg-brand-700 shadow-md">Mengerti</button>
-              </div>
-            </div>
-          )}
-
-          {/* Custom Confirm */}
-          {confirmData.isOpen && (
-            <div className="fixed inset-0 z-[300] flex items-center justify-center p-5 bg-slate-900/50 backdrop-blur-sm animate-fade-in">
-              <div className="bg-white rounded-3xl w-full max-w-xs p-6 shadow-2xl animate-pop text-center border-t-4 border-red-500">
-                <div className="w-12 h-12 bg-red-50 text-red-500 rounded-full flex items-center justify-center mx-auto mb-3 border border-red-100"><Icon name="alert-triangle" className="w-6 h-6"/></div>
-                <h3 className="font-bold text-lg text-slate-800 mb-2">Konfirmasi</h3>
-                <p className="text-sm font-medium text-slate-500 mb-6 leading-relaxed">{confirmData.message}</p>
-                <div className="flex gap-2">
-                  <button onClick={() => setConfirmData({...confirmData, isOpen: false})} className="flex-1 py-3.5 bg-slate-100 text-slate-600 font-bold rounded-2xl">Batal</button>
-                  <button onClick={() => { confirmData.onConfirm(); setConfirmData({...confirmData, isOpen: false}); }} className="flex-1 py-3.5 bg-red-500 text-white font-bold rounded-2xl shadow-md">Ya, Lanjutkan</button>
+          {isEditModalOpen && (
+            <div className="fixed inset-0 z-[150] flex items-end sm:items-center justify-center bg-slate-900/60 backdrop-blur-sm animate-fade-in p-0 sm:p-5">
+              <div className="bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl w-full max-w-sm p-6 pb-10 sm:pb-6 animate-fade-in-up border-t-8 border-blue-500">
+                <div className="flex justify-between items-center mb-5">
+                  <h3 className="font-bold text-xl text-slate-800">Edit Pesanan</h3>
+                  <button onClick={() => setIsEditModalOpen(false)} className="bg-slate-100 text-slate-500 p-1.5 rounded-full"><Icon name="x" className="w-4 h-4"/></button>
                 </div>
-              </div>
-            </div>
-          )}
-
-          {/* Modal PIN Admin */}
-          {isPinModalOpen && (
-            <div className="fixed inset-0 z-[250] flex items-center justify-center p-5 bg-slate-900/60 backdrop-blur-sm animate-fade-in">
-              <div className="bg-white rounded-3xl shadow-2xl w-full max-w-xs p-6 animate-pop relative">
-                <button onClick={() => setIsPinModalOpen(false)} className="absolute right-4 top-4 text-slate-400 hover:bg-slate-100 p-1 rounded-full transition"><Icon name="x" className="w-5 h-5"/></button>
-                <div className="w-14 h-14 bg-slate-50 border border-slate-100 text-slate-400 rounded-full flex items-center justify-center mx-auto mb-4 shadow-inner"><Icon name="lock" className="w-6 h-6"/></div>
-                <h3 className="font-bold text-center text-xl mb-1 text-slate-800">Akses Admin</h3>
-                <p className="text-xs font-medium text-center text-slate-400 mb-6">Masukkan PIN Keamanan</p>
-                
-                <form onSubmit={handlePinSubmit}>
-                  <input 
-                    type="password" 
-                    inputMode="numeric" 
-                    pattern="[0-9]*" 
-                    autoFocus 
-                    maxLength={6} 
-                    placeholder="••••••" 
-                    className="pin-input w-full text-center tracking-[0.5em] text-3xl font-black bg-slate-50 border border-slate-200 px-4 py-3 rounded-2xl mb-2 focus:ring-2 focus:ring-brand-500 outline-none transition-all placeholder:text-2xl placeholder:tracking-widest placeholder:align-middle" 
-                    value={pinInput} 
-                    onChange={(e) => setPinInput(e.target.value.replace(/[^0-9]/g, ''))} 
-                  />
-                  {pinError && <p className="text-red-500 text-[11px] font-bold text-center mb-2">{pinError}</p>}
-                  
-                  <button type="submit" className="w-full mt-3 py-4 bg-slate-800 text-white rounded-2xl font-bold active:scale-95 transition shadow-lg">Masuk Dashboard</button>
-                </form>
-              </div>
-            </div>
-          )}
-
-          {/* Modal Setup WA Admin */}
-          {isSettingOpen && (
-            <div className="fixed inset-0 z-[250] flex items-end sm:items-center justify-center bg-slate-900/80 backdrop-blur-sm animate-fade-in p-0 sm:p-5">
-              <div className="bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden p-6 pb-10 sm:pb-6 animate-fade-in-up">
-                <h3 className="font-bold text-xl text-slate-800 mb-1">Pengaturan Toko</h3>
-                <p className="text-xs font-medium text-slate-500 mb-6">Silakan atur nomor WhatsApp Anda. Link Toko akan dibuat berdasarkan nomor ini.</p>
-                <form onSubmit={handleSaveWaNumber}>
+                <form onSubmit={handleSaveEditOrder} className="space-y-4">
                   <div>
-                    <label className="block text-[11px] font-bold text-slate-400 mb-1.5 uppercase tracking-widest pl-1">Nomor WhatsApp Admin</label>
-                    <div className="relative mb-6">
-                      <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 font-bold"><Icon name="phone" className="w-5 h-5"/></span>
-                      <input type="tel" placeholder="Contoh: 08123456789" required
-                        className="w-full bg-slate-50 border border-slate-200 pl-12 pr-4 py-3.5 rounded-2xl focus:ring-2 focus:ring-brand-500 focus:bg-white outline-none font-bold tracking-wide transition-all"
-                        value={tempWaNumber} onChange={(e) => setTempWaNumber(e.target.value)} />
-                    </div>
+                    <label className="block text-[11px] font-bold text-slate-400 mb-1.5 uppercase tracking-widest pl-1">Nama Pemesan</label>
+                    <input required type="text" className="w-full bg-slate-50 border border-slate-200 px-4 py-3.5 rounded-2xl font-semibold text-sm outline-none focus:ring-2 focus:ring-blue-500" value={editFormData.name} onChange={(e) => setEditFormData({...editFormData, name: e.target.value})} />
                   </div>
-                  <div className="flex gap-2">
-                    {adminWaNumber && <button type="button" onClick={() => setIsSettingOpen(false)} className="flex-1 py-3.5 bg-slate-100 text-slate-600 font-bold rounded-2xl active:bg-slate-200">Batal</button>}
-                    <button type="submit" className="flex-[2] py-3.5 bg-brand-600 text-white font-bold rounded-2xl shadow-md shadow-brand-500/30 active:scale-95 transition">Simpan & Selesai</button>
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-400 mb-1.5 uppercase tracking-widest pl-1">Alamat Pengantaran</label>
+                    <textarea required rows="2" className="w-full bg-slate-50 border border-slate-200 px-4 py-3.5 rounded-2xl font-semibold text-sm outline-none focus:ring-2 focus:ring-blue-500 resize-none" value={editFormData.address} onChange={(e) => setEditFormData({...editFormData, address: e.target.value})}></textarea>
                   </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-400 mb-1.5 uppercase tracking-widest pl-1">Daftar Titipan</label>
+                    <textarea required rows="3" className="w-full bg-slate-50 border border-slate-200 px-4 py-3.5 rounded-2xl font-semibold text-sm outline-none focus:ring-2 focus:ring-blue-500 resize-none" value={editFormData.request} onChange={(e) => setEditFormData({...editFormData, request: e.target.value})}></textarea>
+                  </div>
+                  <button type="submit" className="w-full py-4 bg-blue-600 text-white rounded-2xl font-bold flex justify-center items-center gap-2 active:scale-95 transition shadow-lg mt-2">
+                    Simpan Perubahan <Icon name="save" className="w-4 h-4"/>
+                  </button>
                 </form>
               </div>
             </div>
           )}
 
-          {/* Modal Input Biaya (Admin) - Sebelum Preview */}
+          {/* ==========================================
+              MODAL INPUT BIAYA & KALKULATOR (ADMIN)
+          ========================================== */}
           {isCostModalOpen && (
             <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center bg-slate-900/60 backdrop-blur-sm animate-fade-in p-0 sm:p-5">
-              <div className="bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl w-full max-w-sm p-6 pb-10 sm:pb-6 animate-fade-in-up border-t-8 border-slate-800">
+              <div className="bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl w-full max-w-sm p-6 pb-10 sm:pb-6 animate-fade-in-up border-t-8 border-slate-800 max-h-[95vh] overflow-y-auto">
                 <div className="flex justify-between items-center mb-6">
                   <h3 className="font-bold text-xl text-slate-800">Input Tagihan</h3>
-                  <button onClick={() => setIsCostModalOpen(false)} className="bg-slate-100 hover:bg-slate-200 text-slate-500 p-1.5 rounded-full transition"><Icon name="x" className="w-4 h-4"/></button>
+                  <button onClick={() => setIsCostModalOpen(false)} className="bg-slate-100 text-slate-500 p-1.5 rounded-full"><Icon name="x" className="w-4 h-4"/></button>
                 </div>
+
+                {/* KALKULATOR TOGGLE */}
+                <div className="mb-5">
+                   <button type="button" onClick={() => setShowCalculator(!showCalculator)} className="text-xs font-bold flex items-center gap-1.5 text-brand-600 bg-brand-50 px-3 py-2 rounded-xl w-fit hover:bg-brand-100 transition">
+                      <Icon name="calculator" className="w-4 h-4" />
+                      {showCalculator ? "Tutup Kalkulator" : "Buka Kalkulator Rincian Barang"}
+                   </button>
+                </div>
+                
+                {/* KALKULATOR UI */}
+                {showCalculator && (
+                   <div className="bg-slate-50 border border-slate-200 p-4 rounded-2xl mb-6 space-y-3 animate-fade-in">
+                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Hitung Rincian Barang</p>
+                      {calcValues.map((item, idx) => (
+                         <div key={item.id} className="flex items-center gap-2">
+                            <span className="text-sm font-bold text-slate-400 w-4">{idx+1}.</span>
+                            <input type="number" min="0" placeholder="Harga..." className="flex-1 bg-white border border-slate-200 px-3 py-2.5 rounded-xl text-sm font-bold outline-none focus:ring-2 focus:ring-brand-500" value={item.price} onChange={(e) => updateCalcVal(item.id, e.target.value)} />
+                            <button type="button" onClick={() => removeCalcRow(item.id)} className="p-2 text-red-400 hover:bg-red-50 rounded-xl transition"><Icon name="x" className="w-4 h-4"/></button>
+                         </div>
+                      ))}
+                      <button type="button" onClick={addCalcRow} className="text-[11px] font-bold text-brand-600 bg-brand-50 px-3 py-1.5 rounded-lg flex items-center gap-1 hover:bg-brand-100 transition">
+                         <Icon name="plus" className="w-3 h-3"/> Tambah Baris
+                      </button>
+                      <div className="pt-4 border-t border-slate-200 flex justify-between items-center mt-2">
+                         <span className="text-sm font-black text-slate-700">Total: {formatRupiah(calcValues.reduce((sum, item) => sum + (parseInt(item.price) || 0), 0))}</span>
+                         <button type="button" onClick={applyCalculator} className="bg-slate-800 text-white text-[11px] font-bold px-3 py-2 rounded-xl hover:bg-slate-900 transition active:scale-95">Gunakan Total</button>
+                      </div>
+                   </div>
+                )}
+
                 <form onSubmit={handleAdminPreview} className="space-y-4">
                   <div>
                     <label className="block text-[11px] font-bold text-slate-400 mb-1.5 uppercase tracking-widest pl-1">Harga Barang (Estimasi)</label>
@@ -793,6 +695,75 @@
                     <button type="submit" className="w-full py-4 bg-slate-800 text-white rounded-2xl font-bold flex justify-center items-center gap-2 active:scale-95 transition shadow-lg">
                       Lanjut Lihat Nota <Icon name="arrow-right" className="w-4 h-4"/>
                     </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
+
+          {/* ==========================================
+              MODAL ALERT & LAINNYA
+          ========================================== */}
+          {alertData.isOpen && (
+            <div className="fixed inset-0 z-[300] flex items-center justify-center p-5 bg-slate-900/50 backdrop-blur-sm animate-fade-in">
+              <div className="bg-white rounded-3xl w-full max-w-xs p-6 shadow-2xl animate-pop text-center border-t-4 border-brand-500">
+                <h3 className="font-bold text-lg text-slate-800 mb-2">{alertData.title}</h3>
+                <p className="text-sm font-medium text-slate-500 mb-6 leading-relaxed">{alertData.message}</p>
+                <button onClick={() => setAlertData({...alertData, isOpen: false})} className="w-full py-3.5 bg-brand-600 text-white font-bold rounded-2xl active:bg-brand-700 shadow-md">Mengerti</button>
+              </div>
+            </div>
+          )}
+
+          {confirmData.isOpen && (
+            <div className="fixed inset-0 z-[300] flex items-center justify-center p-5 bg-slate-900/50 backdrop-blur-sm animate-fade-in">
+              <div className="bg-white rounded-3xl w-full max-w-xs p-6 shadow-2xl animate-pop text-center border-t-4 border-red-500">
+                <div className="w-12 h-12 bg-red-50 text-red-500 rounded-full flex items-center justify-center mx-auto mb-3 border border-red-100"><Icon name="alert-triangle" className="w-6 h-6"/></div>
+                <h3 className="font-bold text-lg text-slate-800 mb-2">Konfirmasi</h3>
+                <p className="text-sm font-medium text-slate-500 mb-6 leading-relaxed">{confirmData.message}</p>
+                <div className="flex gap-2">
+                  <button onClick={() => setConfirmData({...confirmData, isOpen: false})} className="flex-1 py-3.5 bg-slate-100 text-slate-600 font-bold rounded-2xl">Batal</button>
+                  <button onClick={() => { confirmData.onConfirm(); setConfirmData({...confirmData, isOpen: false}); }} className="flex-1 py-3.5 bg-red-500 text-white font-bold rounded-2xl shadow-md">Ya, Lanjutkan</button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {isPinModalOpen && (
+            <div className="fixed inset-0 z-[250] flex items-center justify-center p-5 bg-slate-900/60 backdrop-blur-sm animate-fade-in">
+              <div className="bg-white rounded-3xl shadow-2xl w-full max-w-xs p-6 animate-pop relative">
+                <button onClick={() => setIsPinModalOpen(false)} className="absolute right-4 top-4 text-slate-400 hover:bg-slate-100 p-1 rounded-full transition"><Icon name="x" className="w-5 h-5"/></button>
+                <div className="w-14 h-14 bg-slate-50 border border-slate-100 text-slate-400 rounded-full flex items-center justify-center mx-auto mb-4 shadow-inner"><Icon name="lock" className="w-6 h-6"/></div>
+                <h3 className="font-bold text-center text-xl mb-1 text-slate-800">Akses Admin</h3>
+                <p className="text-xs font-medium text-center text-slate-400 mb-6">Masukkan PIN Keamanan</p>
+                <form onSubmit={handlePinSubmit}>
+                  <input type="password" inputMode="numeric" pattern="[0-9]*" autoFocus maxLength={6} placeholder="••••••" 
+                    className="pin-input w-full text-center tracking-[0.5em] text-3xl font-black bg-slate-50 border border-slate-200 px-4 py-3 rounded-2xl mb-2 focus:ring-2 focus:ring-brand-500 outline-none transition-all placeholder:text-2xl placeholder:tracking-widest placeholder:align-middle" 
+                    value={pinInput} onChange={(e) => setPinInput(e.target.value.replace(/[^0-9]/g, ''))} />
+                  {pinError && <p className="text-red-500 text-[11px] font-bold text-center mb-2">{pinError}</p>}
+                  <button type="submit" className="w-full mt-3 py-4 bg-slate-800 text-white rounded-2xl font-bold active:scale-95 transition shadow-lg">Masuk Dashboard</button>
+                </form>
+              </div>
+            </div>
+          )}
+
+          {isSettingOpen && (
+            <div className="fixed inset-0 z-[250] flex items-end sm:items-center justify-center bg-slate-900/80 backdrop-blur-sm animate-fade-in p-0 sm:p-5">
+              <div className="bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden p-6 pb-10 sm:pb-6 animate-fade-in-up">
+                <h3 className="font-bold text-xl text-slate-800 mb-1">Pengaturan Toko</h3>
+                <p className="text-xs font-medium text-slate-500 mb-6">Silakan atur nomor WhatsApp Anda. Link Toko akan dibuat berdasarkan nomor ini.</p>
+                <form onSubmit={handleSaveWaNumber}>
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-400 mb-1.5 uppercase tracking-widest pl-1">Nomor WhatsApp Admin</label>
+                    <div className="relative mb-6">
+                      <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 font-bold"><Icon name="phone" className="w-5 h-5"/></span>
+                      <input type="tel" placeholder="Contoh: 08123456789" required
+                        className="w-full bg-slate-50 border border-slate-200 pl-12 pr-4 py-3.5 rounded-2xl focus:ring-2 focus:ring-brand-500 focus:bg-white outline-none font-bold tracking-wide transition-all"
+                        value={tempWaNumber} onChange={(e) => setTempWaNumber(e.target.value)} />
+                    </div>
+                  </div>
+                  <div className="flex gap-2">
+                    {adminWaNumber && <button type="button" onClick={() => setIsSettingOpen(false)} className="flex-1 py-3.5 bg-slate-100 text-slate-600 font-bold rounded-2xl active:bg-slate-200">Batal</button>}
+                    <button type="submit" className="flex-[2] py-3.5 bg-brand-600 text-white font-bold rounded-2xl shadow-md shadow-brand-500/30 active:scale-95 transition">Simpan & Selesai</button>
                   </div>
                 </form>
               </div>
