@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <meta name="theme-color" content="#10b981" />
-  <title>TitipDong! - Jastip Delivery</title>
+  <title>TitipDong! - Jastip Lokal</title>
   
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
@@ -12,44 +12,33 @@
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   <script src="https://unpkg.com/lucide@latest"></script>
 
-  <!-- Google Font -->
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-
   <script>
     tailwind.config = {
       theme: {
         extend: {
-          fontFamily: { sans: ['Inter', 'sans-serif'] },
           colors: { brand: { 50: '#ecfdf5', 100: '#d1fae5', 500: '#10b981', 600: '#059669', 700: '#047857', 900: '#064e3b' } },
           animation: {
+            'fade-in-up': 'fadeInUp 0.3s ease-out forwards',
             'fade-in': 'fadeIn 0.2s ease-out forwards',
-            'slide-up': 'slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards',
             'pop': 'pop 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards',
-            'spin-slow': 'spin 1s linear infinite',
+            'spin-slow': 'spin 1.5s linear infinite',
           },
           keyframes: {
+            fadeInUp: { '0%': { opacity: '0', transform: 'translateY(10px)' }, '100%': { opacity: '1', transform: 'translateY(0)' } },
             fadeIn: { '0%': { opacity: '0' }, '100%': { opacity: '1' } },
-            slideUp: { '0%': { opacity: '0', transform: 'translateY(100%)' }, '100%': { opacity: '1', transform: 'translateY(0)' } },
-            pop: { '0%': { opacity: '0', transform: 'scale(0.95)' }, '100%': { opacity: '1', transform: 'scale(1)' } }
+            pop: { '0%': { opacity: '0', transform: 'scale(0.9)' }, '100%': { opacity: '1', transform: 'scale(1)' } }
           }
         }
       }
     }
   </script>
-  
   <style>
-    body { -webkit-tap-highlight-color: transparent; background-color: #cbd5e1; }
-    #app-container { 
-      max-width: 480px; margin: 0 auto; background-color: #f8fafc; 
-      min-height: 100vh; min-height: 100dvh; box-shadow: 0 0 40px rgba(0,0,0,0.1); 
-      position: relative; overflow-x: hidden;
-    }
-    ::-webkit-scrollbar { display: none; }
-    .pb-safe { padding-bottom: env(safe-area-inset-bottom, 20px); }
-    .pt-safe { padding-top: env(safe-area-inset-top, 0px); }
+    body { -webkit-tap-highlight-color: transparent; background-color: #e2e8f0; }
+    #app-container { max-width: 480px; margin: 0 auto; background-color: #f8fafc; min-height: 100vh; box-shadow: 0 0 20px rgba(0,0,0,0.05); position: relative; }
+    ::-webkit-scrollbar { width: 0px; background: transparent; }
   </style>
 </head>
-<body class="text-slate-800 antialiased">
+<body>
   <div id="root"></div>
 
   <script type="text/babel">
@@ -58,14 +47,14 @@
     // ==========================================
     // ⚙️ KONFIGURASI DATABASE & ADMIN
     // ==========================================
-    // 1. Paste URL Web App Google Apps Script di sini (Wajib Diisi!)
+    // 1. Paste URL Google Apps Script yang Anda dapatkan di sini:
     const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxaaxuAXOzjnvc8X3dCnkIop9AzV704YwKMowfs-dn_WUxPW2kUIeLOCJhJlzzQ7h0P/exec"; 
     
-    // 2. PIN Keamanan Admin
+    // 2. PIN untuk masuk mode Admin
     const PIN_ADMIN = "123456";
     // ==========================================
 
-    // --- KOMPONEN ICON (Anti-Crash) ---
+    // --- KOMPONEN ICON ANTI-CRASH ---
     const Icon = ({ name, className = "" }) => {
       const iconRef = useRef(null);
       useEffect(() => {
@@ -81,39 +70,40 @@
     const generateId = () => `ORD-${Math.floor(Math.random() * 10000).toString().padStart(4, '0')}`;
 
     const App = () => {
-      
-      // --- ROUTING PINTAR BERDASARKAN URL ---
+
+      // --- DETEKSI MODE URL ---
       const urlParams = new URLSearchParams(window.location.search);
-      const customerWaTarget = urlParams.get('toko');
+      const adminWaFromUrl = urlParams.get('admin');
+      const isCustomerView = !!adminWaFromUrl; // Jika ada "?admin=", ini tampilan pelanggan
 
-      // Penentuan tampilan awal
-      const [view, setView] = useState(() => {
-        if (customerWaTarget) return 'CUSTOMER';
-        return 'ADMIN_LOGIN'; 
-      });
-
-      // State WA Admin (disimpan di HP Admin)
-      const [savedAdminWa, setSavedAdminWa] = useState(() => localStorage.getItem('jastip_admin_wa') || '');
-      const [waInput, setWaInput] = useState(savedAdminWa);
+      // --- STATES ---
+      const [isAdminMode, setIsAdminMode] = useState(false);
+      const [isPinModalOpen, setIsPinModalOpen] = useState(false);
       const [pinInput, setPinInput] = useState('');
-
-      // State Data
       const [isLoading, setIsLoading] = useState(false);
+      
       const [orders, setOrders] = useState([]);
       const [formData, setFormData] = useState({ name: '', address: '', request: '' });
       
-      // State Modal Harga
       const [isCostModalOpen, setIsCostModalOpen] = useState(false);
       const [selectedOrder, setSelectedOrder] = useState(null);
       const [costInput, setCostInput] = useState({ estimatedItemPrice: '', serviceFee: '' });
 
-      // Custom Alert & Confirm Modals
       const [alertData, setAlertData] = useState({ isOpen: false, message: '', title: '' });
       const [confirmData, setConfirmData] = useState({ isOpen: false, message: '', onConfirm: null });
 
-      const showAlert = (message, title = 'Notifikasi') => setAlertData({ isOpen: true, message, title });
+      const showAlert = (message, title = 'Informasi') => setAlertData({ isOpen: true, message, title });
       const showConfirm = (message, onConfirm) => setConfirmData({ isOpen: true, message, onConfirm });
 
+      // --- PENGATURAN WA ADMIN (Hanya Diminta Setelah PIN) ---
+      const [adminWaNumber, setAdminWaNumber] = useState(() => {
+        if (isCustomerView) return adminWaFromUrl;
+        return localStorage.getItem('jastip_admin_wa') || "";
+      });
+      const [isSettingOpen, setIsSettingOpen] = useState(false);
+      const [tempWaNumber, setTempWaNumber] = useState(adminWaNumber);
+
+      // --- FUNGSI DATABASE (API) ---
       const fetchOrders = async () => {
         setIsLoading(true);
         try {
@@ -121,63 +111,38 @@
           const data = await res.json();
           setOrders(data);
         } catch (error) {
-          showAlert("Gagal mengambil data dari Google Sheets. Pastikan URL Script sudah benar.", "Error Database");
+          showAlert("Gagal mengambil data dari server. Periksa koneksi atau URL Script.", "Koneksi Error");
         }
         setIsLoading(false);
       };
 
-      // Load data jika masuk ke dashboard
       useEffect(() => {
-        if (view === 'ADMIN_DASHBOARD') fetchOrders();
-      }, [view]);
+        if (isAdminMode) fetchOrders();
+      }, [isAdminMode]);
 
-      const copyStoreLink = () => {
-        const link = `${window.location.origin}${window.location.pathname}?toko=${savedAdminWa}`;
-        const textArea = document.createElement("textarea");
-        textArea.value = link;
-        document.body.appendChild(textArea);
-        textArea.select();
-        try {
-          document.execCommand('copy');
-          showAlert("Link Toko berhasil disalin!\nBagikan link ini ke bio IG atau berikan langsung ke pelanggan.", "Link Siap");
-        } catch (err) {
-          showAlert("Gagal menyalin. Silakan salin manual:\n" + link);
-        }
-        document.body.removeChild(textArea);
-      };
 
-      const handlePinSubmit = (e) => {
-        e.preventDefault();
-        if (pinInput === PIN_ADMIN) {
-          if (savedAdminWa) setView('ADMIN_DASHBOARD');
-          else setView('ADMIN_SETUP_WA');
-        } else {
-          showAlert("PIN yang Anda masukkan salah.", "Akses Ditolak");
-          setPinInput('');
-        }
-      };
-
-      const handleSaveWaSetup = (e) => {
-        e.preventDefault();
-        let cleaned = waInput.replace(/[^0-9]/g, '');
-        if(cleaned.startsWith('0')) cleaned = '62' + cleaned.substring(1);
-        if(cleaned.length < 10) return showAlert("Nomor WA tidak valid.");
-
-        localStorage.setItem('jastip_admin_wa', cleaned);
-        setSavedAdminWa(cleaned);
-        setView('ADMIN_DASHBOARD');
-      };
-
+      // ==========================================
+      // AKSI PELANGGAN (Form Order -> DB -> WA)
+      // ==========================================
       const handleCustomerSubmit = async (e) => {
         e.preventDefault();
-        if (!customerWaTarget) return showAlert("Link toko tidak valid. Silakan minta link terbaru dari kurir.");
-        if (GOOGLE_SCRIPT_URL.includes("PASTE_URL")) return showAlert("Aplikasi belum dihubungkan ke Database oleh kurir.");
+        if (GOOGLE_SCRIPT_URL.includes("PASTE_URL")) {
+          return showAlert("Aplikasi belum di-setup oleh admin. Hubungi admin toko.", "Error Sistem");
+        }
+        if (!adminWaNumber) {
+          return showAlert("Error: Link toko tidak valid. (Nomor WA Admin tidak ditemukan di URL).", "Error Sistem");
+        }
 
         setIsLoading(true);
         const orderId = generateId();
         const newOrder = {
-          id: orderId, customerName: formData.name, address: formData.address,
-          request: formData.request, status: "MENUNGGU", estimatedItemPrice: 0, serviceFee: 0,
+          id: orderId,
+          customerName: formData.name,
+          address: formData.address,
+          request: formData.request,
+          status: "MENUNGGU",
+          estimatedItemPrice: 0,
+          serviceFee: 0,
           date: new Date().toLocaleDateString('id-ID')
         };
 
@@ -189,23 +154,86 @@
             body: JSON.stringify({ action: 'create', ...newOrder })
           });
 
-          // 2. Format & Kirim ke WA Kurir
+          // 2. Buka WA Admin
           let message = `*PESANAN BARU - TITIP DONG!* 🛵💨\n\n`;
           message += `*ID:* ${orderId}\n`;
           message += `*Nama:* ${formData.name}\n`;
           message += `*Alamat:* ${formData.address}\n\n`;
           message += `*🛍️ PESANAN:*\n${formData.request}\n\n`;
-          message += `Tolong dicek orderan saya di aplikasi dan infokan estimasi total biayanya ya min.`;
+          message += `Mohon dicek di aplikasi ya min, dan info biayanya.`;
 
-          const waUrl = `https://wa.me/${customerWaTarget}?text=${encodeURIComponent(message)}`;
-          window.open(waUrl, '_blank');
+          window.open(`https://wa.me/${adminWaNumber}?text=${encodeURIComponent(message)}`, '_blank');
 
           setFormData({ name: '', address: '', request: '' });
-          showAlert("Pesanan berhasil dikirim! Silakan tunggu pesan balasan (Nota) dari Kurir di WhatsApp.", "Sukses Terkirim");
+          
         } catch (error) {
-          showAlert("Gagal memproses pesanan. Pastikan koneksi internet stabil.", "Koneksi Error");
+          showAlert("Gagal mengirim pesanan. Silakan coba lagi.", "Error Jaringan");
         }
         setIsLoading(false);
+      };
+
+
+      // ==========================================
+      // AKSI ADMIN
+      // ==========================================
+      
+      const handleToggleMode = () => {
+        if (isAdminMode) {
+           setIsAdminMode(false);
+        } else { 
+           setPinInput(''); 
+           setIsPinModalOpen(true); 
+        }
+      };
+
+      // Alur Login Admin & Pengecekan WA
+      const handlePinSubmit = (e) => {
+        e.preventDefault();
+        if (pinInput === PIN_ADMIN) {
+          setIsPinModalOpen(false);
+          setPinInput('');
+          
+          // Jika nomor WA admin belum diatur, munculkan form Setup WA
+          if (!adminWaNumber) {
+             setTempWaNumber('');
+             setIsSettingOpen(true);
+          } else {
+             // Jika sudah ada, langsung masuk Dashboard
+             setIsAdminMode(true);
+          }
+        } else {
+          showAlert("PIN yang Anda masukkan salah.", "Akses Ditolak");
+          setPinInput('');
+        }
+      };
+
+      // Simpan Nomor WA Pertama Kali
+      const handleSaveWaNumber = (e) => {
+        e.preventDefault();
+        let cleanedNumber = tempWaNumber.replace(/[^0-9]/g, '');
+        if (cleanedNumber.startsWith('0')) cleanedNumber = '62' + cleanedNumber.substring(1);
+        if (cleanedNumber.length < 10) return showAlert('Nomor WA tidak valid!', 'Peringatan');
+
+        setAdminWaNumber(cleanedNumber);
+        localStorage.setItem('jastip_admin_wa', cleanedNumber);
+        setIsSettingOpen(false);
+        setIsAdminMode(true); // Otomatis masuk Dashboard setelah berhasil simpan WA
+        showAlert("Nomor WA berhasil disimpan. Jangan lupa salin Link Toko Anda untuk pelanggan.", "Berhasil");
+      };
+
+      const copyToClipboard = () => {
+        const link = `https://${window.location.hostname}/?admin=${adminWaNumber}`;
+        const textArea = document.createElement("textarea");
+        textArea.value = link;
+        document.body.appendChild(textArea);
+        textArea.select();
+        try {
+          document.execCommand('copy');
+          showAlert("Link Toko berhasil disalin! Bagikan ke Bio Instagram atau WhatsApp pelanggan.", "Berhasil Disalin");
+        } catch (err) {
+          showAlert("Gagal menyalin link.");
+        }
+        document.body.removeChild(textArea);
       };
 
       const openCostModal = (order) => {
@@ -214,6 +242,7 @@
         setIsCostModalOpen(true);
       };
 
+      // Admin Simpan Harga & Buka Fitur "SEND TO" WA
       const handleSaveCosts = async (e) => {
         e.preventDefault();
         if (!selectedOrder) return;
@@ -224,22 +253,25 @@
         const totalTagihan = estPrice + srvFee;
 
         try {
-          // 1. Update ke Database
+          // 1. Update ke Google Sheets
           await fetch(GOOGLE_SCRIPT_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'text/plain;charset=utf-8' },
             body: JSON.stringify({ 
-              action: 'update', id: selectedOrder.id, status: "DIPROSES",
-              estimatedItemPrice: estPrice, serviceFee: srvFee
+              action: 'update', 
+              id: selectedOrder.id,
+              status: "DIPROSES",
+              estimatedItemPrice: estPrice,
+              serviceFee: srvFee
             })
           });
 
-          // 2. Sinkron UI secara instan
+          // Update UI
           setOrders(orders.map(order => 
             order.id === selectedOrder.id ? { ...order, estimatedItemPrice: estPrice, serviceFee: srvFee, status: "DIPROSES" } : order
           ));
           
-          // 3. Buat Format Nota (Invoice)
+          // 2. Buka WA Send To
           let notaMsg = `*NOTA TAGIHAN - TITIP DONG!* 🧾\n\n`;
           notaMsg += `Halo kak *${selectedOrder.customerName}*,\n`;
           notaMsg += `Pesanan kakak (*${selectedOrder.id}*) sedang diproses.\n\n`;
@@ -247,30 +279,33 @@
           notaMsg += `Harga Barang : ${formatRupiah(estPrice)}\n`;
           notaMsg += `Ongkir & Jastip : ${formatRupiah(srvFee)}\n`;
           notaMsg += `*TOTAL TAGIHAN : ${formatRupiah(totalTagihan)}*\n\n`;
-          notaMsg += `Mohon balas *OKE* jika setuju agar kurir langsung jalan membelikan pesanan! 🛵💨`;
+          notaMsg += `Mohon balas *OKE* jika setuju agar kurir langsung jalan! 🛵💨`;
 
-          // 4. Buka WA (Metode "Send To" agar kurir bebas pilih kontak pelanggan)
+          // Format `wa.me/?text=` otomatis memicu fitur "Forward to/Send to" di WA
           const waNotaUrl = `https://wa.me/?text=${encodeURIComponent(notaMsg)}`;
           window.open(waNotaUrl, '_blank');
 
           setIsCostModalOpen(false);
           setSelectedOrder(null);
-        } catch (error) { 
-          showAlert("Gagal menyimpan biaya ke server database.", "Error"); 
+        } catch (error) {
+          showAlert("Gagal menyimpan harga ke server.", "Error");
         }
         setIsLoading(false);
       };
 
+      // Update Status Selesai
       const handleCompleteOrder = async (id) => {
         setIsLoading(true);
         try {
-          await fetch(GOOGLE_SCRIPT_URL, { 
-            method: 'POST', 
-            headers: { 'Content-Type': 'text/plain;charset=utf-8' }, 
-            body: JSON.stringify({ action: 'update', id: id, status: "SELESAI" }) 
+          await fetch(GOOGLE_SCRIPT_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify({ action: 'update', id: id, status: "SELESAI" })
           });
           setOrders(orders.map(o => o.id === id ? { ...o, status: "SELESAI" } : o));
-        } catch (e) { showAlert("Gagal mengupdate.", "Error"); }
+        } catch (e) {
+          showAlert("Gagal mengupdate status.", "Error");
+        }
         setIsLoading(false);
       };
 
@@ -278,238 +313,203 @@
         showConfirm("Hapus pesanan ini secara permanen dari Database?", async () => {
           setIsLoading(true);
           try {
-            await fetch(GOOGLE_SCRIPT_URL, { 
-              method: 'POST', 
-              headers: { 'Content-Type': 'text/plain;charset=utf-8' }, 
-              body: JSON.stringify({ action: 'delete', id: id }) 
+            await fetch(GOOGLE_SCRIPT_URL, {
+              method: 'POST',
+              headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+              body: JSON.stringify({ action: 'delete', id: id })
             });
             setOrders(orders.filter(o => o.id !== id));
-          } catch (e) { showAlert("Gagal menghapus.", "Error"); }
+          } catch (e) {
+            showAlert("Gagal menghapus data.", "Error");
+          }
           setIsLoading(false);
         });
       };
 
-      // Hitung Statistik Dashboard
+      // Kalkulasi Statistik
       const pesananSelesai = orders.filter(o => o.status === "SELESAI");
       const totalPendapatan = pesananSelesai.reduce((sum, o) => sum + (parseInt(o.serviceFee)||0), 0);
       const totalPesananAktif = orders.filter(o => o.status !== "SELESAI").length;
 
+
+      // ==========================================
+      // UI RENDER
+      // ==========================================
       return (
-        <div id="app-container" className="flex flex-col">
+        <div id="app-container" className="flex flex-col relative overflow-x-hidden">
           
           {/* OVERLAY LOADING */}
           {isLoading && (
-            <div className="absolute inset-0 z-[200] bg-white/60 backdrop-blur-sm flex flex-col justify-center items-center">
-              <div className="w-14 h-14 bg-white rounded-2xl shadow-xl flex items-center justify-center mb-3 border border-slate-100">
-                <Icon name="loader-2" className="w-8 h-8 text-brand-600 animate-spin-slow" />
-              </div>
-              <p className="text-slate-800 font-bold text-sm tracking-wide">Memproses Database...</p>
+            <div className="absolute inset-0 z-[200] bg-white/70 backdrop-blur-sm flex flex-col justify-center items-center">
+              <Icon name="loader-2" className="w-10 h-10 text-brand-600 animate-spin-slow mb-2" />
+              <p className="text-brand-800 font-bold text-sm">Memproses Data...</p>
             </div>
           )}
 
           {/* HEADER UMUM */}
-          <header className="bg-white/80 backdrop-blur-md sticky top-0 z-30 pt-safe border-b border-slate-100 shadow-sm">
-            <div className="px-5 py-3.5 flex justify-between items-center">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-gradient-to-tr from-brand-600 to-brand-400 rounded-xl flex items-center justify-center text-white shadow-md shadow-brand-200">
-                  <Icon name="shopping-bag" className="w-5 h-5" />
-                </div>
-                <div>
-                  <h1 className="text-[17px] font-extrabold text-slate-800 leading-tight tracking-tight">TitipDong!</h1>
-                  <p className="text-[10px] font-bold text-brand-600 uppercase tracking-widest">{view === 'CUSTOMER' ? 'Jastip Lokal' : 'Dashboard Kurir'}</p>
-                </div>
+          <header className="bg-brand-600 text-white shadow-md sticky top-0 z-30">
+            <div className="px-5 py-4 flex justify-between items-center">
+              <div className="flex items-center gap-2">
+                <div className="bg-white p-1.5 rounded-lg text-brand-600 shadow-sm"><Icon name="package" className="w-5 h-5" /></div>
+                <h1 className="text-xl font-extrabold tracking-tight">TitipDong</h1>
               </div>
-              {view === 'ADMIN_DASHBOARD' && (
-                <button onClick={() => setView('ADMIN_SETUP_WA')} className="w-10 h-10 bg-slate-100 text-slate-500 hover:bg-slate-200 rounded-full flex items-center justify-center transition">
-                  <Icon name="settings" className="w-5 h-5"/>
+              {/* Tombol Akses Admin hanya muncul jika tidak di mode pelanggan */}
+              {!isCustomerView && (
+                <button onClick={handleToggleMode} className="p-2 bg-brand-700/50 hover:bg-brand-700 rounded-full transition shadow-inner">
+                  <Icon name={isAdminMode ? "log-out" : "user"} className="w-5 h-5"/>
                 </button>
               )}
             </div>
           </header>
 
-          <main className="flex-1 px-5 py-6 pb-32 overflow-y-auto">
+          <main className="flex-1 px-5 py-6 pb-24">
             
-            {}
-            {view === 'CUSTOMER' && (
-              <div className="animate-fade-in flex flex-col h-full">
-                <div className="mb-8 mt-2">
-                  <h2 className="text-[28px] font-black text-slate-800 leading-[1.1] mb-2 tracking-tight">
-                    Mau titip<br/><span className="text-brand-600">apa hari ini?</span>
-                  </h2>
-                  <p className="text-sm text-slate-500 font-medium">Isi form di bawah, pesanan akan masuk ke sistem dan dikirim ke WA Kurir.</p>
+            {isCustomerView ? (
+              // ==========================================
+              // TAMPILAN PELANGGAN
+              // ==========================================
+              <div className="animate-fade-in-up">
+                <div className="mb-6">
+                  <h2 className="text-2xl font-black text-slate-800 leading-tight">Pesan<br/>Jastip Sekarang.</h2>
+                  <p className="text-sm text-slate-500 mt-2">Isi form pesanan dan otomatis terkirim ke WhatsApp Kurir.</p>
                 </div>
 
-                <form onSubmit={handleCustomerSubmit} className="space-y-4 flex-1">
-                  <div className="relative">
-                    <div className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400"><Icon name="user" className="w-5 h-5" /></div>
-                    <input required type="text" placeholder="Nama Lengkap Anda" 
-                      className="w-full bg-white border border-slate-200 pl-12 pr-4 py-4 rounded-[1.25rem] text-[15px] font-medium text-slate-800 focus:ring-2 focus:ring-brand-500 outline-none transition-all shadow-sm" 
-                      value={formData.name} onChange={(e) => setFormData({...formData, name: e.target.value})} />
+                <form onSubmit={handleCustomerSubmit} className="space-y-4">
+                  <div className="bg-white p-5 rounded-3xl shadow-sm border border-slate-100 space-y-4">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-400 mb-1.5 uppercase tracking-wider">Nama Anda</label>
+                      <input required type="text" placeholder="Cth: Budi Santoso" 
+                        className="w-full bg-slate-50 border border-slate-200 px-4 py-3.5 rounded-2xl focus:ring-2 focus:ring-brand-500 focus:bg-white outline-none font-medium transition-all" 
+                        value={formData.name} onChange={(e) => setFormData({...formData, name: e.target.value})} />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-400 mb-1.5 uppercase tracking-wider">Alamat Pengantaran</label>
+                      <textarea required rows="2" placeholder="Detail alamat..." 
+                        className="w-full bg-slate-50 border border-slate-200 px-4 py-3.5 rounded-2xl focus:ring-2 focus:ring-brand-500 focus:bg-white outline-none font-medium transition-all resize-none" 
+                        value={formData.address} onChange={(e) => setFormData({...formData, address: e.target.value})}></textarea>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-400 mb-1.5 uppercase tracking-wider">Daftar Titipan / Pesanan</label>
+                      <textarea required rows="3" placeholder="Sebutkan barang dan tokonya..." 
+                        className="w-full bg-slate-50 border border-slate-200 px-4 py-3.5 rounded-2xl focus:ring-2 focus:ring-brand-500 focus:bg-white outline-none font-medium transition-all resize-none" 
+                        value={formData.request} onChange={(e) => setFormData({...formData, request: e.target.value})}></textarea>
+                    </div>
                   </div>
-                  <div className="relative">
-                    <div className="absolute left-4 top-4 text-slate-400"><Icon name="map-pin" className="w-5 h-5" /></div>
-                    <textarea required rows="2" placeholder="Alamat Pengantaran Lengkap" 
-                      className="w-full bg-white border border-slate-200 pl-12 pr-4 py-4 rounded-[1.25rem] text-[15px] font-medium text-slate-800 focus:ring-2 focus:ring-brand-500 outline-none transition-all shadow-sm resize-none" 
-                      value={formData.address} onChange={(e) => setFormData({...formData, address: e.target.value})}></textarea>
-                  </div>
-                  <div className="relative">
-                    <div className="absolute left-4 top-4 text-slate-400"><Icon name="clipboard-list" className="w-5 h-5" /></div>
-                    <textarea required rows="3" placeholder="Sebutkan detail barang dan tokonya..." 
-                      className="w-full bg-white border border-slate-200 pl-12 pr-4 py-4 rounded-[1.25rem] text-[15px] font-medium text-slate-800 focus:ring-2 focus:ring-brand-500 outline-none transition-all shadow-sm resize-none" 
-                      value={formData.request} onChange={(e) => setFormData({...formData, request: e.target.value})}></textarea>
-                  </div>
-
-                  {/* Tombol melayang di bawah khusus HP */}
-                  <div className="fixed bottom-0 left-0 right-0 p-5 bg-gradient-to-t from-white to-transparent pb-safe max-w-[480px] mx-auto z-20 pointer-events-none">
-                    <button type="submit" disabled={isLoading}
-                      className="w-full bg-brand-600 text-white py-4 px-4 rounded-[1.25rem] font-bold flex justify-center items-center gap-2 hover:bg-brand-700 shadow-lg shadow-brand-500/30 text-[16px] active:scale-[0.98] pointer-events-auto transition">
-                      Kirim ke WA Kurir <Icon name="send" className="w-5 h-5" />
-                    </button>
-                  </div>
+                  
+                  <button type="submit" disabled={isLoading}
+                    className="w-full mt-4 bg-brand-600 disabled:bg-slate-400 text-white py-4 rounded-2xl font-bold flex justify-center items-center gap-2 hover:bg-brand-700 transition shadow-md text-lg active:scale-95">
+                    Kirim Pesanan <Icon name="send" className="w-5 h-5" />
+                  </button>
+                  <p className="text-center text-[11px] text-slate-400 mt-2 font-medium">Klik kirim untuk mengarahkan pesanan ke WhatsApp admin.</p>
                 </form>
               </div>
-            )}
 
-            {}
-            {view === 'ADMIN_LOGIN' && (
-              <div className="flex flex-col justify-center items-center h-[70vh] animate-fade-in">
-                <div className="w-16 h-16 bg-brand-100 text-brand-600 rounded-full flex items-center justify-center mb-5 shadow-sm">
-                  <Icon name="lock" className="w-8 h-8"/>
+            ) : !isAdminMode ? (
+              // Tampilan Halaman Utama Vercel jika belum login admin
+              <div className="animate-fade-in-up text-center mt-12">
+                <div className="w-20 h-20 bg-brand-100 text-brand-600 rounded-full flex items-center justify-center mx-auto mb-4">
+                   <Icon name="package-check" className="w-10 h-10"/>
                 </div>
-                <h2 className="text-2xl font-black text-slate-800 mb-2">Akses Admin</h2>
-                <p className="text-slate-500 text-center mb-8 px-4 text-sm font-medium">Masukkan PIN untuk melihat database pesanan.</p>
-                <form onSubmit={handlePinSubmit} className="w-full max-w-xs">
-                  <input type="password" autoFocus maxLength={6} placeholder="••••••" 
-                    className="w-full text-center tracking-[0.5em] text-3xl font-black bg-white border border-slate-200 px-4 py-4 rounded-[1.25rem] mb-4 shadow-sm focus:ring-2 focus:ring-brand-500 outline-none" 
-                    value={pinInput} onChange={(e) => setPinInput(e.target.value)} />
-                  <button type="submit" className="w-full py-4 bg-slate-900 text-white rounded-2xl font-bold active:scale-95 transition text-[16px]">Masuk Dashboard</button>
-                </form>
+                <h2 className="text-2xl font-black text-slate-800 mb-2">Portal Admin Jastip</h2>
+                <p className="text-sm text-slate-500 mb-6 px-4">Aplikasi ini adalah dashboard khusus kurir/admin. Klik ikon profil di pojok kanan atas untuk login.</p>
               </div>
-            )}
 
-            {view === 'ADMIN_SETUP_WA' && (
-              <div className="flex flex-col justify-center items-center h-[70vh] animate-fade-in">
-                <div className="w-16 h-16 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center mb-5 shadow-sm">
-                  <Icon name="phone" className="w-8 h-8"/>
-                </div>
-                <h2 className="text-2xl font-black text-slate-800 mb-2">Setup Nomor WA</h2>
-                <p className="text-slate-500 text-center mb-8 px-4 text-sm font-medium">Nomor ini digunakan untuk membuat Link Toko agar pelanggan memesan ke WA Anda.</p>
-                <form onSubmit={handleSaveWaSetup} className="w-full max-w-xs space-y-4">
-                  <input type="tel" placeholder="Contoh: 0812345..." required
-                    className="w-full font-bold bg-white border border-slate-200 px-4 py-4 rounded-[1.25rem] shadow-sm focus:ring-2 focus:ring-brand-500 outline-none" 
-                    value={waInput} onChange={(e) => setWaInput(e.target.value)} />
-                  <button type="submit" className="w-full py-4 bg-brand-600 text-white rounded-2xl font-bold shadow-lg shadow-brand-500/30 active:scale-95 transition">Simpan & Lanjutkan</button>
-                  {savedAdminWa && (
-                     <button type="button" onClick={() => setView('ADMIN_DASHBOARD')} className="w-full py-3 text-slate-500 font-bold hover:bg-slate-100 rounded-2xl transition">Kembali ke Dashboard</button>
-                  )}
-                </form>
-              </div>
-            )}
-
-            {}
-            {view === 'ADMIN_DASHBOARD' && (
-              <div className="animate-fade-in">
+            ) : (
+              // ==========================================
+              // TAMPILAN ADMIN (Dashboard)
+              // ==========================================
+              <div className="animate-fade-in-up">
                 
-                {/* Panel Link Toko */}
-                <div className="bg-slate-900 text-white p-5 rounded-[1.5rem] shadow-lg mb-6 relative overflow-hidden">
-                  <Icon name="share-2" className="absolute right-[-10px] top-[-10px] w-24 h-24 text-white opacity-5" />
-                  <p className="text-[11px] font-bold text-brand-400 uppercase tracking-widest mb-1 relative z-10">Link Pelanggan</p>
-                  <h3 className="font-bold text-sm mb-3 relative z-10">Bagikan link ini ke Instagram / pembeli:</h3>
-                  <button onClick={copyStoreLink} className="w-full bg-white text-slate-900 py-3 rounded-xl font-bold flex justify-center items-center gap-2 active:scale-95 transition relative z-10">
-                    <Icon name="copy" className="w-4 h-4"/> Salin Link Toko
+                <div className="bg-slate-800 text-white rounded-3xl p-5 mb-6 shadow-lg relative overflow-hidden">
+                  <div className="absolute right-0 top-0 opacity-10 scale-150 transform translate-x-4 -translate-y-4">
+                    <Icon name="share-2" className="w-32 h-32" />
+                  </div>
+                  <h3 className="font-bold text-sm mb-1 text-slate-300 uppercase tracking-wide">Link Toko Anda</h3>
+                  <div className="bg-slate-900/50 p-3 rounded-xl border border-slate-700/50 mt-2 mb-3 overflow-hidden text-ellipsis whitespace-nowrap text-xs font-mono text-brand-300">
+                    {`https://${window.location.hostname}/?admin=${adminWaNumber}`}
+                  </div>
+                  <button onClick={copyToClipboard} className="w-full py-2.5 bg-brand-500 hover:bg-brand-600 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition">
+                    <Icon name="copy" className="w-4 h-4"/> Salin Link Pelanggan
                   </button>
                 </div>
 
-                {/* Dashboard Statistik */}
+                {/* Dashboard Stats */}
                 <div className="grid grid-cols-2 gap-3 mb-6">
-                  <div className="bg-brand-500 text-white p-4 sm:p-5 rounded-[1.5rem] shadow-lg shadow-brand-500/30 relative overflow-hidden">
-                    <Icon name="wallet" className="w-16 h-16 absolute -right-3 -bottom-3 text-brand-600 opacity-50" />
-                    <p className="text-[10px] sm:text-[11px] font-bold text-brand-100 uppercase tracking-widest mb-1 z-10 relative">Omset Selesai</p>
-                    <h3 className="text-xl sm:text-2xl font-black z-10 relative">{formatRupiah(totalPendapatan)}</h3>
+                  <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 flex flex-col justify-center relative overflow-hidden">
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wide mb-1 z-10">Omset Bersih (Selesai)</p>
+                    <h3 className="text-xl font-black text-brand-600 z-10">{formatRupiah(totalPendapatan)}</h3>
                   </div>
-                  <div className="bg-white p-4 sm:p-5 rounded-[1.5rem] shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-slate-100 flex flex-col justify-center">
-                    <p className="text-[10px] sm:text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1">Status Database</p>
-                    <div className="flex items-center gap-3">
-                      <div><span className="text-xl sm:text-2xl font-black text-slate-800">{totalPesananAktif}</span> <span className="text-[10px] text-slate-400">Aktif</span></div>
-                      <div className="h-6 w-[1px] bg-slate-200"></div>
-                      <div><span className="text-xl sm:text-2xl font-black text-brand-600">{pesananSelesai.length}</span> <span className="text-[10px] text-slate-400">Selesai</span></div>
+                  <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 flex flex-col justify-center">
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wide mb-1">Status Database</p>
+                    <div className="flex items-baseline gap-1.5">
+                      <span className="text-xl font-black text-slate-800">{totalPesananAktif}</span><span className="text-[10px] text-slate-500">Aktif</span>
+                      <span className="text-slate-300 mx-0.5">•</span>
+                      <span className="text-xl font-black text-slate-800">{pesananSelesai.length}</span><span className="text-[10px] text-slate-500">Selesai</span>
                     </div>
                   </div>
                 </div>
 
-                <div className="flex justify-between items-center mb-4">
-                  <h3 className="font-bold text-slate-800 text-[17px] tracking-tight">Database Pesanan</h3>
-                  <button onClick={fetchOrders} className="w-9 h-9 bg-white shadow-sm border border-slate-100 text-slate-500 rounded-full flex items-center justify-center hover:bg-slate-50 active:scale-95 transition">
-                    <Icon name="refresh-cw" className="w-4 h-4"/>
+                <div className="flex justify-between items-center mb-3">
+                  <h3 className="font-bold text-slate-800 flex items-center gap-2"><Icon name="database" className="w-5 h-5 text-brand-600"/> Data Pesanan</h3>
+                  <button onClick={fetchOrders} className="text-xs bg-brand-100 text-brand-700 px-3 py-1.5 rounded-full font-bold hover:bg-brand-200 flex items-center gap-1">
+                    <Icon name="refresh-cw" className="w-3 h-3"/> Muat Ulang
                   </button>
                 </div>
 
-                {/* List Orders */}
                 <div className="space-y-4">
-                  {orders.map((order) => {
-                    const isNew = order.status === 'MENUNGGU';
-                    const isProcess = order.status === 'DIPROSES';
-                    const isDone = order.status === 'SELESAI';
-                    return (
-                      <div key={order.id} className="bg-white rounded-[1.5rem] shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-slate-100 overflow-hidden relative">
-                        <div className={`absolute left-0 top-0 bottom-0 w-1.5 ${isNew ? 'bg-amber-400' : isProcess ? 'bg-brand-500' : 'bg-slate-300'}`}></div>
-                        
-                        <div className="p-5 pl-6">
-                          <div className="flex justify-between items-start mb-3">
-                            <div>
-                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full mb-2 inline-block tracking-wide uppercase
-                                ${isNew ? 'bg-amber-100 text-amber-700' : isProcess ? 'bg-brand-100 text-brand-700' : 'bg-slate-100 text-slate-500'}
-                              `}>{order.status}</span>
-                              <h3 className="font-bold text-slate-800 text-lg leading-tight">{order.customerName}</h3>
-                            </div>
-                            <span className="text-[10px] font-medium text-slate-400 bg-slate-50 px-2 py-1 rounded-md">{order.date}</span>
-                          </div>
-                          
-                          <div className="flex items-start gap-2 text-sm text-slate-600 mb-4">
-                            <Icon name="map-pin" className="w-4 h-4 shrink-0 mt-0.5 text-slate-400" />
-                            <span className="leading-snug">{order.address}</span>
-                          </div>
-                          
-                          <div className="bg-slate-50/80 rounded-2xl p-3.5 border border-slate-100">
-                            <p className="text-xs font-medium text-slate-700 whitespace-pre-wrap leading-relaxed">{order.request}</p>
-                          </div>
-
-                          {(isProcess || isDone) && (
-                            <div className="mt-4 pt-4 border-t border-dashed border-slate-200">
-                              <div className="flex justify-between text-sm text-slate-500 mb-1"><span>Estimasi Barang</span><span>{formatRupiah(order.estimatedItemPrice)}</span></div>
-                              <div className="flex justify-between text-sm text-slate-500 mb-2"><span>Ongkir + Jastip</span><span className="text-brand-600 font-medium">{formatRupiah(order.serviceFee)}</span></div>
-                              <div className="flex justify-between pt-2 items-center">
-                                <span className="text-[11px] font-bold text-slate-800 uppercase tracking-widest">Total Tagihan</span>
-                                <span className="font-black text-slate-900 text-[17px]">{formatRupiah(order.estimatedItemPrice + order.serviceFee)}</span>
-                              </div>
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Aksi Admin pada tiap Order */}
-                        <div className="p-3 px-4 bg-slate-50 border-t border-slate-100 flex gap-2">
-                          {isNew && (
-                            <button onClick={() => openCostModal(order)} className="flex-1 bg-slate-900 text-white py-3 rounded-xl text-sm font-bold flex justify-center items-center gap-2 hover:bg-slate-800 active:scale-95 transition">
-                              Beri Harga & Forward Nota
-                            </button>
-                          )}
-                          {isProcess && (
-                            <button onClick={() => handleCompleteOrder(order.id)} className="flex-1 bg-brand-500 text-white py-3 rounded-xl text-sm font-bold flex justify-center items-center gap-2 hover:bg-brand-600 active:scale-95 transition">
-                              <Icon name="check" className="w-4 h-4"/> Selesaikan Pesanan
-                            </button>
-                          )}
-                          <button onClick={() => handleDeleteOrder(order.id)} className="w-12 bg-white text-slate-400 hover:text-red-500 border border-slate-200 rounded-xl flex items-center justify-center active:bg-slate-100 transition">
-                            <Icon name="trash-2" className="w-4 h-4" />
-                          </button>
-                        </div>
+                  {orders.map((order) => (
+                    <div key={order.id} className="bg-white rounded-3xl shadow-sm border border-slate-100 overflow-hidden">
+                      <div className="px-5 py-3 border-b flex justify-between items-center bg-slate-50/50">
+                        <span className={`text-[10px] font-bold px-2 py-1 rounded-md uppercase tracking-wide ${order.status === 'MENUNGGU' ? 'bg-amber-100 text-amber-700' : order.status === 'DIPROSES' ? 'bg-brand-100 text-brand-700' : 'bg-slate-200 text-slate-500'}`}>
+                          {order.status}
+                        </span>
+                        <span className="text-[10px] font-mono text-slate-400">{order.date}</span>
                       </div>
-                    );
-                  })}
+                      
+                      <div className="p-5">
+                        <h3 className="font-bold text-slate-800 text-lg mb-1">{order.customerName}</h3>
+                        <p className="text-xs font-medium text-slate-500 mb-4 flex items-start gap-1"><Icon name="map-pin" className="w-3.5 h-3.5 shrink-0 mt-0.5" />{order.address}</p>
+                        
+                        <div className="bg-slate-50 border border-slate-100 p-3.5 rounded-2xl text-sm text-slate-700 whitespace-pre-wrap shadow-inner">
+                          {order.request}
+                        </div>
+                        
+                        {(order.status === 'DIPROSES' || order.status === 'SELESAI') && (
+                          <div className="mt-4 pt-4 border-t border-dashed border-slate-200 space-y-1">
+                             <div className="flex justify-between text-xs text-slate-500">
+                                <span>Estimasi Barang</span><span>{formatRupiah(order.estimatedItemPrice)}</span>
+                             </div>
+                             <div className="flex justify-between text-xs text-brand-600 font-bold">
+                                <span>Ongkir + Jastip</span><span>{formatRupiah(order.serviceFee)}</span>
+                             </div>
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="p-3 bg-slate-50/80 border-t flex gap-2">
+                        {order.status === 'MENUNGGU' && (
+                          <button onClick={() => openCostModal(order)} className="flex-1 bg-brand-600 text-white py-3 rounded-xl text-sm font-bold flex justify-center items-center gap-2 hover:bg-brand-700 transition">
+                            <Icon name="calculator" className="w-4 h-4"/> Konfirmasi Harga
+                          </button>
+                        )}
+                        {order.status === 'DIPROSES' && (
+                          <button onClick={() => handleCompleteOrder(order.id)} className="flex-1 bg-slate-800 text-white py-3 rounded-xl text-sm font-bold flex justify-center items-center gap-2 hover:bg-slate-900 transition">
+                            <Icon name="check-circle" className="w-4 h-4"/> Tandai Selesai
+                          </button>
+                        )}
+                        <button onClick={() => handleDeleteOrder(order.id)} className="w-12 bg-white text-slate-400 hover:text-red-500 border rounded-xl flex items-center justify-center transition" title="Hapus">
+                          <Icon name="trash-2" className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
                   {orders.length === 0 && !isLoading && (
-                    <div className="py-16 flex flex-col items-center justify-center text-center">
-                      <div className="w-20 h-20 bg-white rounded-full flex items-center justify-center mb-4 shadow-sm border border-slate-100 text-slate-300"><Icon name="inbox" className="w-10 h-10" /></div>
-                      <h4 className="font-bold text-slate-700 mb-1">Database Kosong</h4>
-                      <p className="text-sm text-slate-500">Menunggu pesanan masuk dari pelanggan.</p>
+                    <div className="text-center py-12">
+                      <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center mx-auto mb-3 border text-slate-300">
+                        <Icon name="inbox" className="w-8 h-8" />
+                      </div>
+                      <p className="text-sm font-bold text-slate-400">Database Kosong.</p>
+                      <p className="text-xs text-slate-400">Klik 'Muat Ulang' jika ada pesanan baru.</p>
                     </div>
                   )}
                 </div>
@@ -517,81 +517,101 @@
             )}
           </main>
 
-          
-          {}
+          {/* ==========================================
+              MODALS KOMPONEN
+          ========================================== */}
           
           {/* Custom Alert */}
           {alertData.isOpen && (
-            <div className="fixed inset-0 z-[300] flex items-center justify-center p-6 bg-slate-900/40 backdrop-blur-sm animate-fade-in">
-              <div className="bg-white rounded-[1.5rem] w-full max-w-[320px] p-6 shadow-2xl animate-pop text-center">
-                <div className="w-14 h-14 bg-brand-100 text-brand-600 rounded-full flex items-center justify-center mx-auto mb-4"><Icon name="bell" className="w-6 h-6"/></div>
-                <h3 className="font-bold text-[17px] text-slate-800 mb-2">{alertData.title}</h3>
-                <p className="text-sm text-slate-500 mb-6 whitespace-pre-wrap leading-relaxed">{alertData.message}</p>
-                <button onClick={() => setAlertData({...alertData, isOpen: false})} className="w-full py-3.5 bg-slate-900 text-white font-bold rounded-xl active:scale-95 transition">Mengerti</button>
+            <div className="fixed inset-0 z-[300] flex items-center justify-center p-5 bg-slate-900/40 backdrop-blur-sm animate-fade-in">
+              <div className="bg-white rounded-3xl w-full max-w-xs p-6 shadow-2xl animate-pop text-center">
+                <h3 className="font-bold text-lg text-slate-800 mb-2">{alertData.title}</h3>
+                <p className="text-sm text-slate-600 mb-6 leading-relaxed">{alertData.message}</p>
+                <button onClick={() => setAlertData({...alertData, isOpen: false})} className="w-full py-3 bg-brand-600 text-white font-bold rounded-xl active:bg-brand-700">Tutup</button>
               </div>
             </div>
           )}
 
           {/* Custom Confirm */}
           {confirmData.isOpen && (
-            <div className="fixed inset-0 z-[300] flex items-center justify-center p-6 bg-slate-900/40 backdrop-blur-sm animate-fade-in">
-              <div className="bg-white rounded-[1.5rem] w-full max-w-[320px] p-6 shadow-2xl animate-pop text-center">
-                <div className="w-14 h-14 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto mb-4"><Icon name="alert-triangle" className="w-6 h-6"/></div>
-                <h3 className="font-bold text-[17px] text-slate-800 mb-2">Konfirmasi</h3>
-                <p className="text-sm text-slate-500 mb-6 leading-relaxed">{confirmData.message}</p>
-                <div className="flex gap-3">
-                  <button onClick={() => setConfirmData({...confirmData, isOpen: false})} className="flex-1 py-3.5 bg-slate-100 text-slate-700 font-bold rounded-xl active:bg-slate-200 transition">Batal</button>
-                  <button onClick={() => { confirmData.onConfirm(); setConfirmData({...confirmData, isOpen: false}); }} className="flex-1 py-3.5 bg-red-500 text-white font-bold rounded-xl active:bg-red-600 transition">Ya, Hapus</button>
+            <div className="fixed inset-0 z-[300] flex items-center justify-center p-5 bg-slate-900/40 backdrop-blur-sm animate-fade-in">
+              <div className="bg-white rounded-3xl w-full max-w-xs p-6 shadow-2xl animate-pop text-center">
+                <h3 className="font-bold text-lg text-slate-800 mb-2">Konfirmasi</h3>
+                <p className="text-sm text-slate-600 mb-6 leading-relaxed">{confirmData.message}</p>
+                <div className="flex gap-2">
+                  <button onClick={() => setConfirmData({...confirmData, isOpen: false})} className="flex-1 py-3 bg-slate-100 text-slate-700 font-bold rounded-xl active:bg-slate-200">Batal</button>
+                  <button onClick={() => { confirmData.onConfirm(); setConfirmData({...confirmData, isOpen: false}); }} className="flex-1 py-3 bg-red-500 text-white font-bold rounded-xl active:bg-red-600">Ya, Lanjutkan</button>
                 </div>
               </div>
             </div>
           )}
 
-          {/* Modal Bottom Sheet: Input Biaya */}
-          {isCostModalOpen && (
-            <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/40 backdrop-blur-sm animate-fade-in">
-              <div className="bg-white rounded-t-[2rem] w-full max-w-[480px] p-6 pb-safe animate-slide-up relative">
+          {/* Modal PIN Admin */}
+          {isPinModalOpen && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-5 bg-slate-900/60 backdrop-blur-sm animate-fade-in">
+              <div className="bg-white rounded-3xl shadow-2xl w-full max-w-xs p-6 animate-pop relative">
+                <button onClick={() => setIsPinModalOpen(false)} className="absolute right-4 top-4 text-slate-400"><Icon name="x" className="w-5 h-5"/></button>
+                <div className="w-12 h-12 bg-slate-100 text-slate-600 rounded-full flex items-center justify-center mx-auto mb-3"><Icon name="lock" className="w-6 h-6"/></div>
+                <h3 className="font-bold text-center text-lg mb-1 text-slate-800">Akses Admin</h3>
+                <p className="text-xs text-center text-slate-500 mb-5">Masukkan PIN Keamanan (123456)</p>
                 
-                {/* Drag handler bar */}
-                <div className="w-12 h-1.5 bg-slate-200 rounded-full mx-auto mb-6"></div>
-                <button onClick={() => setIsCostModalOpen(false)} className="absolute right-5 top-5 text-slate-400 bg-slate-100 p-2 rounded-full"><Icon name="x" className="w-4 h-4"/></button>
-                
-                <div className="mb-6">
-                  <h3 className="font-black text-xl text-slate-800 mb-1">Buat Nota Tagihan</h3>
-                  <p className="text-xs font-medium text-slate-500 uppercase tracking-wide">{selectedOrder?.customerName}</p>
-                </div>
+                <form onSubmit={handlePinSubmit}>
+                  <input type="password" autoFocus maxLength={6} placeholder="••••••" 
+                    className="w-full text-center tracking-[0.5em] text-2xl font-black bg-slate-50 border px-4 py-3.5 rounded-2xl mb-2 focus:ring-2 focus:ring-brand-500 outline-none" 
+                    value={pinInput} onChange={(e) => setPinInput(e.target.value)} />
+                  <button type="submit" className="w-full mt-2 py-3.5 bg-slate-800 text-white rounded-2xl font-bold active:bg-slate-900 transition">Masuk</button>
+                </form>
+              </div>
+            </div>
+          )}
 
+          {/* Modal Setup WA Admin */}
+          {isSettingOpen && (
+            <div className="fixed inset-0 z-[250] flex items-end sm:items-center justify-center bg-slate-900/80 backdrop-blur-sm animate-fade-in p-0 sm:p-5">
+              <div className="bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden p-6 pb-10 sm:pb-6 animate-fade-in-up">
+                <h3 className="font-bold text-xl text-slate-800 mb-1">Pengaturan Awal</h3>
+                <p className="text-xs font-medium text-slate-500 mb-5">Silakan atur nomor WhatsApp Anda. Sistem akan membuat Link Toko berdasarkan nomor ini.</p>
+                <form onSubmit={handleSaveWaNumber}>
+                  <div className="relative mb-5">
+                    <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 font-bold"><Icon name="phone" className="w-5 h-5"/></span>
+                    <input type="tel" placeholder="Contoh: 08123456789" required
+                      className="w-full bg-slate-50 border border-slate-200 pl-12 pr-4 py-3.5 rounded-2xl focus:ring-2 focus:ring-brand-500 focus:bg-white outline-none font-bold tracking-wide transition-all"
+                      value={tempWaNumber} onChange={(e) => setTempWaNumber(e.target.value)} />
+                  </div>
+                  <button type="submit" className="w-full py-3.5 bg-brand-600 text-white font-bold rounded-2xl shadow-md active:bg-brand-700 transition">Simpan & Buka Dashboard</button>
+                </form>
+              </div>
+            </div>
+          )}
+
+          {/* Modal Input Biaya & Nota */}
+          {isCostModalOpen && (
+            <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/60 backdrop-blur-sm animate-fade-in p-0 sm:p-5">
+              <div className="bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl w-full max-w-sm p-6 pb-10 sm:pb-6 animate-fade-in-up">
+                <div className="flex justify-between items-center mb-5">
+                  <h3 className="font-bold text-xl text-slate-800">Konfirmasi Harga</h3>
+                  <button onClick={() => setIsCostModalOpen(false)} className="bg-slate-100 text-slate-500 p-1.5 rounded-full"><Icon name="x" className="w-4 h-4"/></button>
+                </div>
                 <form onSubmit={handleSaveCosts} className="space-y-4">
                   <div>
-                    <label className="block text-xs font-bold text-slate-500 mb-2 uppercase tracking-wide ml-1">Harga Beli Barang (Estimasi)</label>
+                    <label className="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wide">Harga Barang (Estimasi)</label>
                     <div className="relative">
-                      <span className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-400 font-bold">Rp</span>
-                      <input required type="number" min="0" placeholder="0" 
-                        className="w-full bg-slate-50 border border-slate-200 pl-12 pr-4 py-4 rounded-[1.25rem] font-black text-lg text-slate-800 outline-none focus:ring-2 focus:ring-brand-500 transition-all" 
-                        value={costInput.estimatedItemPrice} onChange={(e) => setCostInput({...costInput, estimatedItemPrice: e.target.value})} />
+                      <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 font-bold">Rp</span>
+                      <input required type="number" min="0" placeholder="0" className="w-full bg-slate-50 border border-slate-200 pl-11 pr-4 py-3.5 rounded-2xl font-black outline-none focus:ring-2 focus:ring-brand-500" value={costInput.estimatedItemPrice} onChange={(e) => setCostInput({...costInput, estimatedItemPrice: e.target.value})} />
                     </div>
                   </div>
                   <div>
-                    <label className="block text-xs font-bold text-slate-500 mb-2 uppercase tracking-wide ml-1">Ongkos Kirim + Jastip</label>
+                    <label className="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wide">Ongkos Kirim + Jastip</label>
                     <div className="relative">
-                      <span className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-400 font-bold">Rp</span>
-                      <input required type="number" min="0" placeholder="0" 
-                        className="w-full bg-slate-50 border border-slate-200 pl-12 pr-4 py-4 rounded-[1.25rem] font-black text-lg text-slate-800 outline-none focus:ring-2 focus:ring-brand-500 transition-all" 
-                        value={costInput.serviceFee} onChange={(e) => setCostInput({...costInput, serviceFee: e.target.value})} />
+                      <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 font-bold">Rp</span>
+                      <input required type="number" min="0" placeholder="0" className="w-full bg-slate-50 border border-slate-200 pl-11 pr-4 py-3.5 rounded-2xl font-black outline-none focus:ring-2 focus:ring-brand-500" value={costInput.serviceFee} onChange={(e) => setCostInput({...costInput, serviceFee: e.target.value})} />
                     </div>
                   </div>
                   
-                  {/* Auto Kalkulasi Tagihan */}
-                  <div className="bg-brand-50 p-5 rounded-[1.25rem] border border-brand-100 flex justify-between items-center mt-2">
-                    <span className="font-bold text-brand-800 text-xs uppercase tracking-wide">Total Tagihan</span>
-                    <span className="font-black text-[22px] tracking-tight text-brand-600">{formatRupiah((parseInt(costInput.estimatedItemPrice)||0) + (parseInt(costInput.serviceFee)||0))}</span>
-                  </div>
-
-                  <button type="submit" disabled={isLoading} 
-                    className="w-full mt-4 py-4 bg-slate-900 text-white rounded-2xl font-bold flex justify-center items-center gap-2 active:scale-95 transition-all text-[16px] h-[56px]">
-                    Share Nota (Send To WA) <Icon name="share" className="w-4 h-4"/>
+                  <button type="submit" disabled={isLoading} className="w-full mt-4 py-4 bg-brand-600 disabled:bg-slate-400 text-white rounded-2xl font-bold flex justify-center items-center gap-2 shadow-md active:scale-95 transition">
+                    Konfirmasi & Kirim WA <Icon name="share" className="w-4 h-4"/>
                   </button>
-                  <p className="text-[10px] text-center font-medium text-slate-400 mt-2 px-4">Setelah menekan tombol ini, pilih chat WhatsApp pelanggan untuk mem-forward nota tagihan.</p>
+                  <p className="text-[10px] text-center text-slate-400">Membuka WA Send To. Pilih kontak pelanggan Anda.</p>
                 </form>
               </div>
             </div>
