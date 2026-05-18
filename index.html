@@ -116,7 +116,7 @@
 
 
       // ==========================================
-      // 🚀 BACKGROUND SYNC ENGINE
+      // 🚀 BACKGROUND SYNC ENGINE (UPDATE FIX)
       // ==========================================
       
       const processSyncQueue = async () => {
@@ -135,37 +135,46 @@
         isSyncingRef.current = true;
         setSyncStatus('syncing');
 
-        while (queue.length > 0) {
-          try {
-            const item = queue[0]; // PERBAIKAN: Mengambil urutan pertama dari antrean
-            await fetch(GOOGLE_SCRIPT_URL, {
-              method: 'POST',
-              headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-              body: JSON.stringify(item.payload),
-              keepalive: true // Memastikan request tetap jalan walau tab browser mati (beralih ke WA)
-            });
-            // Hapus dari antrean jika sukses
-            queue.shift();
-            localStorage.setItem('jastip_sync_queue', JSON.stringify(queue));
-          } catch (e) {
-            setSyncStatus('error');
-            isSyncingRef.current = false;
-            return; // Berhenti jika error, coba lagi nanti
+        // PERBAIKAN: Ambil item paling pertama di antrean
+        const item = queue[0];
+
+        try {
+          // PERBAIKAN: Gunakan mode 'no-cors' agar browser HP tidak memblokir koneksi secara diam-diam
+          await fetch(GOOGLE_SCRIPT_URL, {
+            method: 'POST',
+            mode: 'no-cors',
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify(item.payload),
+          });
+
+          // PERBAIKAN: Hapus item yang SPESIFIK berhasil dikirim berdasarkan ID
+          let currentQueue = JSON.parse(localStorage.getItem('jastip_sync_queue')) || [];
+          currentQueue = currentQueue.filter(q => q.id !== item.id);
+          localStorage.setItem('jastip_sync_queue', JSON.stringify(currentQueue));
+
+        } catch (e) {
+          console.error("Gagal sync ke database:", e);
+          setSyncStatus('error');
+        } finally {
+          isSyncingRef.current = false;
+          // Rekursif: Jika antrean masih ada sisa, jalankan lagi
+          const remainingQueue = JSON.parse(localStorage.getItem('jastip_sync_queue')) || [];
+          if(remainingQueue.length > 0) {
+            setTimeout(processSyncQueue, 1000);
+          } else {
+            setSyncStatus('idle');
           }
         }
-        
-        setSyncStatus('idle');
-        isSyncingRef.current = false;
       };
 
       const enqueueSync = (payload) => {
         const queue = JSON.parse(localStorage.getItem('jastip_sync_queue')) || [];
         queue.push({ id: Date.now(), payload });
         localStorage.setItem('jastip_sync_queue', JSON.stringify(queue));
-        processSyncQueue(); // Trigger sync di background
+        processSyncQueue(); // Trigger sync di background secara otomatis
       };
 
-      // Listener deteksi sinyal balik
+      // Listener deteksi sinyal balik (Otomatis sync pas dapat jaringan)
       useEffect(() => {
         window.addEventListener('online', processSyncQueue);
         window.addEventListener('offline', () => setSyncStatus('offline'));
@@ -182,7 +191,6 @@
         try {
           const res = await fetch(GOOGLE_SCRIPT_URL);
           const data = await res.json();
-          // Merge logic sederhana (Prioritaskan server)
           setOrders(data);
         } catch (error) {
           console.log("Silently failed fetching updates.");
@@ -193,7 +201,7 @@
       useEffect(() => {
         if (isAdminMode) {
            fetchOrders();
-           processSyncQueue(); // Jalankan antrean tertunda saat buka admin
+           processSyncQueue(); // Jalankan antrean tertunda saat admin membuka dashboard
         }
       }, [isAdminMode]);
 
@@ -223,10 +231,10 @@
           date: new Date().toLocaleDateString('id-ID')
         };
 
-        // 1. Masukkan ke Antrean Sync (Background)
+        // 1. Masukkan ke Antrean Sync Database (Optimistic)
         enqueueSync({ action: 'create', ...newOrder });
 
-        // 2. Siapkan Pesan
+        // 2. Siapkan Pesan WA
         let message = `*PESANAN BARU - TITIP DONG!* 🛵💨\n\n`;
         message += `*ID:* ${newOrder.id}\n`;
         message += `*Nama:* ${newOrder.customerName}\n`;
@@ -234,14 +242,14 @@
         message += `*🛍️ PESANAN:*\n${newOrder.request}\n\n`;
         message += `Mohon info estimasi biayanya ya min.`;
 
-        // 3. Reset UI (Instant)
+        // 3. Reset UI (Biar berasa tidak loading)
         setFormData({ name: '', address: '', request: '' });
         setCustomerPreviewData(null);
         
-        // 4. PERBAIKAN: Beri jeda 300 milidetik agar pengiriman ke Database tereksekusi aman sebelum pindah ke WA
+        // 4. PERBAIKAN: Beri jeda 800ms sebelum Redirect agar sinyal fetch ke server sempat keluar dari HP
         setTimeout(() => {
           window.location.href = `https://wa.me/${adminWaNumber}?text=${encodeURIComponent(message)}`;
-        }, 300);
+        }, 800);
       };
 
 
@@ -333,14 +341,14 @@
       const submitAdminNota = () => {
         if (!adminPreviewData) return;
 
-        // 1. Optimistic UI Update (Langsung ganti di layar Admin)
+        // 1. Optimistic UI Update (Langsung ganti di layar Admin seolah-olah instan)
         setOrders(orders.map(order => 
           order.id === adminPreviewData.order.id 
             ? { ...order, estimatedItemPrice: adminPreviewData.estPrice, serviceFee: adminPreviewData.srvFee, status: "DIPROSES" } 
             : order
         ));
 
-        // 2. Masukkan ke Antrean Sync
+        // 2. Masukkan ke Antrean Sync Database
         enqueueSync({ 
           action: 'update', 
           id: adminPreviewData.order.id,
@@ -349,15 +357,15 @@
           serviceFee: adminPreviewData.srvFee
         });
         
-        // 3. Reset Modal & Redirect (Instant)
+        // 3. Reset Modal & Delay Redirect
         const notaUrl = `https://wa.me/?text=${encodeURIComponent(adminPreviewData.notaMsg)}`;
         setAdminPreviewData(null);
         setSelectedOrder(null);
         
-        // PERBAIKAN: Jeda aman untuk Admin sebelum pindah ke fitur Send To WA
+        // PERBAIKAN: Jeda aman 800ms
         setTimeout(() => {
           window.location.href = notaUrl;
-        }, 300);
+        }, 800);
       };
 
       const handleCompleteOrder = (id) => {
@@ -400,7 +408,6 @@
                     {syncStatus === 'syncing' && <Icon name="refresh-cw" className="w-3.5 h-3.5 animate-spin-slow" />}
                     {syncStatus === 'offline' && <Icon name="wifi-off" className="w-3.5 h-3.5 text-amber-300" />}
                     {syncStatus === 'error' && <Icon name="alert-circle" className="w-3.5 h-3.5 text-red-300" />}
-                    {/* Jika idle, tidak tampil icon apa2 agar bersih */}
                   </div>
                 )}
               </div>
@@ -596,7 +603,7 @@
               MODAL PREVIEW PELANGGAN
           ========================================== */}
           {customerPreviewData && (
-            <div className="fixed inset-0 z- flex items-end sm:items-center justify-center bg-slate-900/60 backdrop-blur-sm animate-fade-in p-0 sm:p-5">
+            <div className="fixed inset-0 z-[150] flex items-end sm:items-center justify-center bg-slate-900/60 backdrop-blur-sm animate-fade-in p-0 sm:p-5">
               <div className="bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl w-full max-w-sm p-6 pb-8 sm:pb-6 animate-fade-in-up">
                 <div className="flex items-center justify-center w-14 h-14 bg-brand-50 text-brand-600 rounded-full mx-auto mb-4 border border-brand-100">
                   <Icon name="file-check-2" className="w-7 h-7"/>
@@ -634,7 +641,7 @@
               MODAL PREVIEW NOTA ADMIN
           ========================================== */}
           {adminPreviewData && (
-            <div className="fixed inset-0 z- flex items-end sm:items-center justify-center bg-slate-900/60 backdrop-blur-sm animate-fade-in p-0 sm:p-5">
+            <div className="fixed inset-0 z-[150] flex items-end sm:items-center justify-center bg-slate-900/60 backdrop-blur-sm animate-fade-in p-0 sm:p-5">
               <div className="bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl w-full max-w-sm p-6 pb-8 sm:pb-6 animate-fade-in-up border-t-8 border-brand-500 relative">
                 <div className="absolute top-0 right-6 w-8 h-10 bg-brand-500 shadow-sm rounded-b flex items-end justify-center pb-2">
                   <Icon name="receipt" className="w-4 h-4 text-white"/>
@@ -676,7 +683,7 @@
           
           {/* Custom Alert */}
           {alertData.isOpen && (
-            <div className="fixed inset-0 z- flex items-center justify-center p-5 bg-slate-900/50 backdrop-blur-sm animate-fade-in">
+            <div className="fixed inset-0 z-[300] flex items-center justify-center p-5 bg-slate-900/50 backdrop-blur-sm animate-fade-in">
               <div className="bg-white rounded-3xl w-full max-w-xs p-6 shadow-2xl animate-pop text-center border-t-4 border-brand-500">
                 <h3 className="font-bold text-lg text-slate-800 mb-2">{alertData.title}</h3>
                 <p className="text-sm font-medium text-slate-500 mb-6 leading-relaxed">{alertData.message}</p>
@@ -687,7 +694,7 @@
 
           {/* Custom Confirm */}
           {confirmData.isOpen && (
-            <div className="fixed inset-0 z- flex items-center justify-center p-5 bg-slate-900/50 backdrop-blur-sm animate-fade-in">
+            <div className="fixed inset-0 z-[300] flex items-center justify-center p-5 bg-slate-900/50 backdrop-blur-sm animate-fade-in">
               <div className="bg-white rounded-3xl w-full max-w-xs p-6 shadow-2xl animate-pop text-center border-t-4 border-red-500">
                 <div className="w-12 h-12 bg-red-50 text-red-500 rounded-full flex items-center justify-center mx-auto mb-3 border border-red-100"><Icon name="alert-triangle" className="w-6 h-6"/></div>
                 <h3 className="font-bold text-lg text-slate-800 mb-2">Konfirmasi</h3>
@@ -702,7 +709,7 @@
 
           {/* Modal PIN Admin */}
           {isPinModalOpen && (
-            <div className="fixed inset-0 z- flex items-center justify-center p-5 bg-slate-900/60 backdrop-blur-sm animate-fade-in">
+            <div className="fixed inset-0 z-[250] flex items-center justify-center p-5 bg-slate-900/60 backdrop-blur-sm animate-fade-in">
               <div className="bg-white rounded-3xl shadow-2xl w-full max-w-xs p-6 animate-pop relative">
                 <button onClick={() => setIsPinModalOpen(false)} className="absolute right-4 top-4 text-slate-400 hover:bg-slate-100 p-1 rounded-full transition"><Icon name="x" className="w-5 h-5"/></button>
                 <div className="w-14 h-14 bg-slate-50 border border-slate-100 text-slate-400 rounded-full flex items-center justify-center mx-auto mb-4 shadow-inner"><Icon name="lock" className="w-6 h-6"/></div>
@@ -731,7 +738,7 @@
 
           {/* Modal Setup WA Admin */}
           {isSettingOpen && (
-            <div className="fixed inset-0 z- flex items-end sm:items-center justify-center bg-slate-900/80 backdrop-blur-sm animate-fade-in p-0 sm:p-5">
+            <div className="fixed inset-0 z-[250] flex items-end sm:items-center justify-center bg-slate-900/80 backdrop-blur-sm animate-fade-in p-0 sm:p-5">
               <div className="bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden p-6 pb-10 sm:pb-6 animate-fade-in-up">
                 <h3 className="font-bold text-xl text-slate-800 mb-1">Pengaturan Toko</h3>
                 <p className="text-xs font-medium text-slate-500 mb-6">Silakan atur nomor WhatsApp Anda. Link Toko akan dibuat berdasarkan nomor ini.</p>
@@ -747,7 +754,7 @@
                   </div>
                   <div className="flex gap-2">
                     {adminWaNumber && <button type="button" onClick={() => setIsSettingOpen(false)} className="flex-1 py-3.5 bg-slate-100 text-slate-600 font-bold rounded-2xl active:bg-slate-200">Batal</button>}
-                    <button type="submit" className="flex- py-3.5 bg-brand-600 text-white font-bold rounded-2xl shadow-md shadow-brand-500/30 active:scale-95 transition">Simpan & Selesai</button>
+                    <button type="submit" className="flex-[2] py-3.5 bg-brand-600 text-white font-bold rounded-2xl shadow-md shadow-brand-500/30 active:scale-95 transition">Simpan & Selesai</button>
                   </div>
                 </form>
               </div>
@@ -756,7 +763,7 @@
 
           {/* Modal Input Biaya (Admin) - Sebelum Preview */}
           {isCostModalOpen && (
-            <div className="fixed inset-0 z- flex items-end sm:items-center justify-center bg-slate-900/60 backdrop-blur-sm animate-fade-in p-0 sm:p-5">
+            <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center bg-slate-900/60 backdrop-blur-sm animate-fade-in p-0 sm:p-5">
               <div className="bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl w-full max-w-sm p-6 pb-10 sm:pb-6 animate-fade-in-up border-t-8 border-slate-800">
                 <div className="flex justify-between items-center mb-6">
                   <h3 className="font-bold text-xl text-slate-800">Input Tagihan</h3>
