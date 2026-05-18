@@ -36,6 +36,7 @@
       }
     }
   </script>
+  
   <style>
     body { -webkit-tap-highlight-color: transparent; background-color: #cbd5e1; }
     #app-container { 
@@ -61,7 +62,7 @@
     const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxaaxuAXOzjnvc8X3dCnkIop9AzV704YwKMowfs-dn_WUxPW2kUIeLOCJhJlzzQ7h0P/exec"; 
     
     // 2. PIN Keamanan Admin
-    const PIN_ADMIN = "123000";
+    const PIN_ADMIN = "123456";
     // ==========================================
 
     // --- KOMPONEN ICON (Anti-Crash) ---
@@ -82,38 +83,37 @@
     const App = () => {
       
       // --- ROUTING PINTAR BERDASARKAN URL ---
-      // Jika URL memiliki ?toko=628... berarti ini mode pelanggan
       const urlParams = new URLSearchParams(window.location.search);
       const customerWaTarget = urlParams.get('toko');
 
-      // Tentukan Tampilan Utama (View)
-      // View: 'CUSTOMER', 'ADMIN_LOGIN', 'ADMIN_SETUP_WA', 'ADMIN_DASHBOARD'
+      // Penentuan tampilan awal
       const [view, setView] = useState(() => {
         if (customerWaTarget) return 'CUSTOMER';
-        return 'ADMIN_LOGIN'; // Default jika buka URL langsung
+        return 'ADMIN_LOGIN'; 
       });
 
-      // WA Admin State (Disimpan Lokal untuk pembuatan link)
+      // State WA Admin (disimpan di HP Admin)
       const [savedAdminWa, setSavedAdminWa] = useState(() => localStorage.getItem('jastip_admin_wa') || '');
       const [waInput, setWaInput] = useState(savedAdminWa);
       const [pinInput, setPinInput] = useState('');
 
+      // State Data
       const [isLoading, setIsLoading] = useState(false);
       const [orders, setOrders] = useState([]);
       const [formData, setFormData] = useState({ name: '', address: '', request: '' });
       
+      // State Modal Harga
       const [isCostModalOpen, setIsCostModalOpen] = useState(false);
       const [selectedOrder, setSelectedOrder] = useState(null);
       const [costInput, setCostInput] = useState({ estimatedItemPrice: '', serviceFee: '' });
 
-      // Custom Modals
+      // Custom Alert & Confirm Modals
       const [alertData, setAlertData] = useState({ isOpen: false, message: '', title: '' });
       const [confirmData, setConfirmData] = useState({ isOpen: false, message: '', onConfirm: null });
 
       const showAlert = (message, title = 'Notifikasi') => setAlertData({ isOpen: true, message, title });
       const showConfirm = (message, onConfirm) => setConfirmData({ isOpen: true, message, onConfirm });
 
-      // --- FETCH DATA (KHUSUS ADMIN) ---
       const fetchOrders = async () => {
         setIsLoading(true);
         try {
@@ -126,12 +126,11 @@
         setIsLoading(false);
       };
 
-      // Load data otomatis jika masuk ke Dashboard
+      // Load data jika masuk ke dashboard
       useEffect(() => {
         if (view === 'ADMIN_DASHBOARD') fetchOrders();
       }, [view]);
 
-      // --- COPY LINK TOKO (ADMIN) ---
       const copyStoreLink = () => {
         const link = `${window.location.origin}${window.location.pathname}?toko=${savedAdminWa}`;
         const textArea = document.createElement("textarea");
@@ -140,14 +139,13 @@
         textArea.select();
         try {
           document.execCommand('copy');
-          showAlert("Link Toko berhasil disalin!\nBagikan link ini ke bio IG atau WA pelanggan.", "Link Disalin");
+          showAlert("Link Toko berhasil disalin!\nBagikan link ini ke bio IG atau berikan langsung ke pelanggan.", "Link Siap");
         } catch (err) {
           showAlert("Gagal menyalin. Silakan salin manual:\n" + link);
         }
         document.body.removeChild(textArea);
       };
 
-      // --- LOGIN & SETUP ADMIN ---
       const handlePinSubmit = (e) => {
         e.preventDefault();
         if (pinInput === PIN_ADMIN) {
@@ -170,11 +168,10 @@
         setView('ADMIN_DASHBOARD');
       };
 
-      // --- AKSI PELANGGAN (KIRIM ORDER) ---
       const handleCustomerSubmit = async (e) => {
         e.preventDefault();
-        if (!customerWaTarget) return showAlert("Link toko tidak valid.");
-        if (GOOGLE_SCRIPT_URL.includes("PASTE_URL")) return showAlert("Aplikasi belum dihubungkan ke Database oleh pemilik toko.");
+        if (!customerWaTarget) return showAlert("Link toko tidak valid. Silakan minta link terbaru dari kurir.");
+        if (GOOGLE_SCRIPT_URL.includes("PASTE_URL")) return showAlert("Aplikasi belum dihubungkan ke Database oleh kurir.");
 
         setIsLoading(true);
         const orderId = generateId();
@@ -185,33 +182,32 @@
         };
 
         try {
-          // 1. Simpan ke DB
+          // 1. Simpan ke Database
           await fetch(GOOGLE_SCRIPT_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'text/plain;charset=utf-8' },
             body: JSON.stringify({ action: 'create', ...newOrder })
           });
 
-          // 2. Buka WA (Kirim ke wa target / admin)
+          // 2. Format & Kirim ke WA Kurir
           let message = `*PESANAN BARU - TITIP DONG!* 🛵💨\n\n`;
           message += `*ID:* ${orderId}\n`;
           message += `*Nama:* ${formData.name}\n`;
           message += `*Alamat:* ${formData.address}\n\n`;
           message += `*🛍️ PESANAN:*\n${formData.request}\n\n`;
-          message += `Tolong info estimasi biayanya ya min.`;
+          message += `Tolong dicek orderan saya di aplikasi dan infokan estimasi total biayanya ya min.`;
 
           const waUrl = `https://wa.me/${customerWaTarget}?text=${encodeURIComponent(message)}`;
           window.open(waUrl, '_blank');
 
           setFormData({ name: '', address: '', request: '' });
-          showAlert("Pesanan berhasil dikirim! Silakan tunggu konfirmasi Kurir di WhatsApp.", "Sukses");
+          showAlert("Pesanan berhasil dikirim! Silakan tunggu pesan balasan (Nota) dari Kurir di WhatsApp.", "Sukses Terkirim");
         } catch (error) {
-          showAlert("Gagal memproses pesanan. Pastikan koneksi internet stabil.", "Error");
+          showAlert("Gagal memproses pesanan. Pastikan koneksi internet stabil.", "Koneksi Error");
         }
         setIsLoading(false);
       };
 
-      // --- AKSI ADMIN (MANAJEMEN PESANAN) ---
       const openCostModal = (order) => {
         setSelectedOrder(order);
         setCostInput({ estimatedItemPrice: order.estimatedItemPrice || '', serviceFee: order.serviceFee || '' });
@@ -228,7 +224,7 @@
         const totalTagihan = estPrice + srvFee;
 
         try {
-          // 1. Update ke DB
+          // 1. Update ke Database
           await fetch(GOOGLE_SCRIPT_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'text/plain;charset=utf-8' },
@@ -238,12 +234,12 @@
             })
           });
 
-          // 2. Update state lokal untuk sinkronisasi cepat UI
+          // 2. Sinkron UI secara instan
           setOrders(orders.map(order => 
             order.id === selectedOrder.id ? { ...order, estimatedItemPrice: estPrice, serviceFee: srvFee, status: "DIPROSES" } : order
           ));
           
-          // 3. Format Nota ke WA
+          // 3. Buat Format Nota (Invoice)
           let notaMsg = `*NOTA TAGIHAN - TITIP DONG!* 🧾\n\n`;
           notaMsg += `Halo kak *${selectedOrder.customerName}*,\n`;
           notaMsg += `Pesanan kakak (*${selectedOrder.id}*) sedang diproses.\n\n`;
@@ -251,14 +247,17 @@
           notaMsg += `Harga Barang : ${formatRupiah(estPrice)}\n`;
           notaMsg += `Ongkir & Jastip : ${formatRupiah(srvFee)}\n`;
           notaMsg += `*TOTAL TAGIHAN : ${formatRupiah(totalTagihan)}*\n\n`;
-          notaMsg += `Mohon balas *OKE* jika setuju agar kurir langsung jalan! 🛵💨`;
+          notaMsg += `Mohon balas *OKE* jika setuju agar kurir langsung jalan membelikan pesanan! 🛵💨`;
 
+          // 4. Buka WA (Metode "Send To" agar kurir bebas pilih kontak pelanggan)
           const waNotaUrl = `https://wa.me/?text=${encodeURIComponent(notaMsg)}`;
           window.open(waNotaUrl, '_blank');
 
           setIsCostModalOpen(false);
           setSelectedOrder(null);
-        } catch (error) { showAlert("Gagal menyimpan biaya.", "Error"); }
+        } catch (error) { 
+          showAlert("Gagal menyimpan biaya ke server database.", "Error"); 
+        }
         setIsLoading(false);
       };
 
@@ -290,7 +289,7 @@
         });
       };
 
-      // Hitung Stats Admin
+      // Hitung Statistik Dashboard
       const pesananSelesai = orders.filter(o => o.status === "SELESAI");
       const totalPendapatan = pesananSelesai.reduce((sum, o) => sum + (parseInt(o.serviceFee)||0), 0);
       const totalPesananAktif = orders.filter(o => o.status !== "SELESAI").length;
@@ -304,11 +303,11 @@
               <div className="w-14 h-14 bg-white rounded-2xl shadow-xl flex items-center justify-center mb-3 border border-slate-100">
                 <Icon name="loader-2" className="w-8 h-8 text-brand-600 animate-spin-slow" />
               </div>
-              <p className="text-slate-800 font-bold text-sm tracking-wide">Memproses Sinkronisasi...</p>
+              <p className="text-slate-800 font-bold text-sm tracking-wide">Memproses Database...</p>
             </div>
           )}
 
-          {/* HEADER GENERAL */}
+          {/* HEADER UMUM */}
           <header className="bg-white/80 backdrop-blur-md sticky top-0 z-30 pt-safe border-b border-slate-100 shadow-sm">
             <div className="px-5 py-3.5 flex justify-between items-center">
               <div className="flex items-center gap-3">
@@ -337,7 +336,7 @@
                   <h2 className="text-[28px] font-black text-slate-800 leading-[1.1] mb-2 tracking-tight">
                     Mau titip<br/><span className="text-brand-600">apa hari ini?</span>
                   </h2>
-                  <p className="text-sm text-slate-500 font-medium">Isi form di bawah, kami akan segera merespon via WhatsApp Anda.</p>
+                  <p className="text-sm text-slate-500 font-medium">Isi form di bawah, pesanan akan masuk ke sistem dan dikirim ke WA Kurir.</p>
                 </div>
 
                 <form onSubmit={handleCustomerSubmit} className="space-y-4 flex-1">
@@ -360,11 +359,11 @@
                       value={formData.request} onChange={(e) => setFormData({...formData, request: e.target.value})}></textarea>
                   </div>
 
-                  {/* Fixed Button At Bottom Mobile */}
-                  <div className="fixed bottom-0 left-0 right-0 p-5 bg-gradient-to-t from-white to-transparent pb-safe max-w-[480px] mx-auto z-20">
+                  {/* Tombol melayang di bawah khusus HP */}
+                  <div className="fixed bottom-0 left-0 right-0 p-5 bg-gradient-to-t from-white to-transparent pb-safe max-w-[480px] mx-auto z-20 pointer-events-none">
                     <button type="submit" disabled={isLoading}
-                      className="w-full bg-brand-600 text-white py-4 px-4 rounded-[1.25rem] font-bold flex justify-center items-center gap-2 hover:bg-brand-700 shadow-lg shadow-brand-500/30 text-[16px] active:scale-[0.98]">
-                      Kirim Pesanan <Icon name="send" className="w-5 h-5" />
+                      className="w-full bg-brand-600 text-white py-4 px-4 rounded-[1.25rem] font-bold flex justify-center items-center gap-2 hover:bg-brand-700 shadow-lg shadow-brand-500/30 text-[16px] active:scale-[0.98] pointer-events-auto transition">
+                      Kirim ke WA Kurir <Icon name="send" className="w-5 h-5" />
                     </button>
                   </div>
                 </form>
@@ -396,12 +395,12 @@
                 <h2 className="text-2xl font-black text-slate-800 mb-2">Setup Nomor WA</h2>
                 <p className="text-slate-500 text-center mb-8 px-4 text-sm font-medium">Nomor ini digunakan untuk membuat Link Toko agar pelanggan memesan ke WA Anda.</p>
                 <form onSubmit={handleSaveWaSetup} className="w-full max-w-xs space-y-4">
-                  <input type="tel" placeholder="Contoh: 62812345..." required
+                  <input type="tel" placeholder="Contoh: 0812345..." required
                     className="w-full font-bold bg-white border border-slate-200 px-4 py-4 rounded-[1.25rem] shadow-sm focus:ring-2 focus:ring-brand-500 outline-none" 
                     value={waInput} onChange={(e) => setWaInput(e.target.value)} />
                   <button type="submit" className="w-full py-4 bg-brand-600 text-white rounded-2xl font-bold shadow-lg shadow-brand-500/30 active:scale-95 transition">Simpan & Lanjutkan</button>
                   {savedAdminWa && (
-                     <button type="button" onClick={() => setView('ADMIN_DASHBOARD')} className="w-full py-3 text-slate-500 font-bold hover:bg-slate-100 rounded-2xl transition">Batal</button>
+                     <button type="button" onClick={() => setView('ADMIN_DASHBOARD')} className="w-full py-3 text-slate-500 font-bold hover:bg-slate-100 rounded-2xl transition">Kembali ke Dashboard</button>
                   )}
                 </form>
               </div>
@@ -415,7 +414,7 @@
                 <div className="bg-slate-900 text-white p-5 rounded-[1.5rem] shadow-lg mb-6 relative overflow-hidden">
                   <Icon name="share-2" className="absolute right-[-10px] top-[-10px] w-24 h-24 text-white opacity-5" />
                   <p className="text-[11px] font-bold text-brand-400 uppercase tracking-widest mb-1 relative z-10">Link Pelanggan</p>
-                  <h3 className="font-bold text-sm mb-3 relative z-10">Bagikan link ini ke pembeli:</h3>
+                  <h3 className="font-bold text-sm mb-3 relative z-10">Bagikan link ini ke Instagram / pembeli:</h3>
                   <button onClick={copyStoreLink} className="w-full bg-white text-slate-900 py-3 rounded-xl font-bold flex justify-center items-center gap-2 active:scale-95 transition relative z-10">
                     <Icon name="copy" className="w-4 h-4"/> Salin Link Toko
                   </button>
@@ -475,7 +474,6 @@
                             <p className="text-xs font-medium text-slate-700 whitespace-pre-wrap leading-relaxed">{order.request}</p>
                           </div>
 
-                          {/* Info Biaya jika sudah diset */}
                           {(isProcess || isDone) && (
                             <div className="mt-4 pt-4 border-t border-dashed border-slate-200">
                               <div className="flex justify-between text-sm text-slate-500 mb-1"><span>Estimasi Barang</span><span>{formatRupiah(order.estimatedItemPrice)}</span></div>
@@ -488,16 +486,16 @@
                           )}
                         </div>
 
-                        {/* Tombol Aksi Admin */}
+                        {/* Aksi Admin pada tiap Order */}
                         <div className="p-3 px-4 bg-slate-50 border-t border-slate-100 flex gap-2">
                           {isNew && (
                             <button onClick={() => openCostModal(order)} className="flex-1 bg-slate-900 text-white py-3 rounded-xl text-sm font-bold flex justify-center items-center gap-2 hover:bg-slate-800 active:scale-95 transition">
-                              Beri Harga & Nota
+                              Beri Harga & Forward Nota
                             </button>
                           )}
                           {isProcess && (
                             <button onClick={() => handleCompleteOrder(order.id)} className="flex-1 bg-brand-500 text-white py-3 rounded-xl text-sm font-bold flex justify-center items-center gap-2 hover:bg-brand-600 active:scale-95 transition">
-                              <Icon name="check" className="w-4 h-4"/> Tandai Selesai
+                              <Icon name="check" className="w-4 h-4"/> Selesaikan Pesanan
                             </button>
                           )}
                           <button onClick={() => handleDeleteOrder(order.id)} className="w-12 bg-white text-slate-400 hover:text-red-500 border border-slate-200 rounded-xl flex items-center justify-center active:bg-slate-100 transition">
@@ -511,7 +509,7 @@
                     <div className="py-16 flex flex-col items-center justify-center text-center">
                       <div className="w-20 h-20 bg-white rounded-full flex items-center justify-center mb-4 shadow-sm border border-slate-100 text-slate-300"><Icon name="inbox" className="w-10 h-10" /></div>
                       <h4 className="font-bold text-slate-700 mb-1">Database Kosong</h4>
-                      <p className="text-sm text-slate-500">Belum ada pesanan yang masuk ke server.</p>
+                      <p className="text-sm text-slate-500">Menunggu pesanan masuk dari pelanggan.</p>
                     </div>
                   )}
                 </div>
@@ -520,7 +518,9 @@
           </main>
 
           
-          {/* Modal Custom Alert */}
+          {}
+          
+          {/* Custom Alert */}
           {alertData.isOpen && (
             <div className="fixed inset-0 z-[300] flex items-center justify-center p-6 bg-slate-900/40 backdrop-blur-sm animate-fade-in">
               <div className="bg-white rounded-[1.5rem] w-full max-w-[320px] p-6 shadow-2xl animate-pop text-center">
@@ -532,7 +532,7 @@
             </div>
           )}
 
-          {/* Modal Custom Confirm */}
+          {/* Custom Confirm */}
           {confirmData.isOpen && (
             <div className="fixed inset-0 z-[300] flex items-center justify-center p-6 bg-slate-900/40 backdrop-blur-sm animate-fade-in">
               <div className="bg-white rounded-[1.5rem] w-full max-w-[320px] p-6 shadow-2xl animate-pop text-center">
@@ -547,16 +547,17 @@
             </div>
           )}
 
-          {/* Modal Input Biaya (Bottom Sheet Style) */}
+          {/* Modal Bottom Sheet: Input Biaya */}
           {isCostModalOpen && (
             <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/40 backdrop-blur-sm animate-fade-in">
               <div className="bg-white rounded-t-[2rem] w-full max-w-[480px] p-6 pb-safe animate-slide-up relative">
-                {/* Bar penanda drag */}
+                
+                {/* Drag handler bar */}
                 <div className="w-12 h-1.5 bg-slate-200 rounded-full mx-auto mb-6"></div>
                 <button onClick={() => setIsCostModalOpen(false)} className="absolute right-5 top-5 text-slate-400 bg-slate-100 p-2 rounded-full"><Icon name="x" className="w-4 h-4"/></button>
                 
                 <div className="mb-6">
-                  <h3 className="font-black text-xl text-slate-800 mb-1">Buat Nota</h3>
+                  <h3 className="font-black text-xl text-slate-800 mb-1">Buat Nota Tagihan</h3>
                   <p className="text-xs font-medium text-slate-500 uppercase tracking-wide">{selectedOrder?.customerName}</p>
                 </div>
 
@@ -580,7 +581,7 @@
                     </div>
                   </div>
                   
-                  {/* Kalkulasi Otomatis */}
+                  {/* Auto Kalkulasi Tagihan */}
                   <div className="bg-brand-50 p-5 rounded-[1.25rem] border border-brand-100 flex justify-between items-center mt-2">
                     <span className="font-bold text-brand-800 text-xs uppercase tracking-wide">Total Tagihan</span>
                     <span className="font-black text-[22px] tracking-tight text-brand-600">{formatRupiah((parseInt(costInput.estimatedItemPrice)||0) + (parseInt(costInput.serviceFee)||0))}</span>
@@ -588,9 +589,9 @@
 
                   <button type="submit" disabled={isLoading} 
                     className="w-full mt-4 py-4 bg-slate-900 text-white rounded-2xl font-bold flex justify-center items-center gap-2 active:scale-95 transition-all text-[16px] h-[56px]">
-                    Share Nota "Send To" WA <Icon name="share" className="w-4 h-4"/>
+                    Share Nota (Send To WA) <Icon name="share" className="w-4 h-4"/>
                   </button>
-                  <p className="text-[10px] text-center font-medium text-slate-400 mt-2 px-4">Tindakan ini akan otomatis menyimpan harga ke Database (Google Sheets) dan membuka menu forward WA.</p>
+                  <p className="text-[10px] text-center font-medium text-slate-400 mt-2 px-4">Setelah menekan tombol ini, pilih chat WhatsApp pelanggan untuk mem-forward nota tagihan.</p>
                 </form>
               </div>
             </div>
