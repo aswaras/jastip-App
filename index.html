@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>TitipDong! - Aplikasi Jastip</title>
+  
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: { 
+            brand: { 50: '#ecfdf5', 100: '#d1fae5', 500: '#10b981', 600: '#059669', 700: '#047857', 900: '#064e3b' } 
+          },
+          animation: {
+            'fade-in-up': 'fadeInUp 0.3s ease-out forwards',
+            'fade-in': 'fadeIn 0.2s ease-out forwards',
+          },
+          keyframes: {
+            fadeInUp: { '0%': { opacity: '0', transform: 'translateY(10px) scale(0.98)' }, '100%': { opacity: '1', transform: 'translateY(0) scale(1)' } },
+            fadeIn: { '0%': { opacity: '0' }, '100%': { opacity: '1' } }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    body { -webkit-tap-highlight-color: transparent; background-color: #f8fafc; font-family: 'Inter', sans-serif; }
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+    .pb-safe { padding-bottom: env(safe-area-inset-bottom); }
+  </style>
+</head>
+<body class="text-slate-800 antialiased">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect } = React;
+
+    const Icon = ({ name, className = "" }) => <i data-lucide={name} className={className}></i>;
+    const formatRupiah = (number) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(number || 0);
+    const generateId = () => `ORD-${Math.floor(Math.random() * 10000).toString().padStart(4, '0')}`;
+
+    const App = () => {
+      // Re-render Lucide icons on updates
+      useEffect(() => { if (window.lucide) window.lucide.createIcons(); });
+
+      const [isAdminMode, setIsAdminMode] = useState(false);
+      const [isPinModalOpen, setIsPinModalOpen] = useState(false);
+      const [pinInput, setPinInput] = useState('');
+      const [pinError, setPinError] = useState('');
+      const PIN_ADMIN = "123456";
+
+      // --- CUSTOM DIALOG STATE ---
+      const [dialog, setDialog] = useState({ isOpen: false, type: 'alert', title: '', message: '', onConfirm: null });
+
+      const showAlert = (title, message) => setDialog({ isOpen: true, type: 'alert', title, message, onConfirm: null });
+      const showConfirm = (title, message, onConfirmCallback) => setDialog({ isOpen: true, type: 'confirm', title, message, onConfirm: onConfirmCallback });
+      const closeDialog = () => setDialog({ ...dialog, isOpen: false });
+
+      const [adminWaNumber, setAdminWaNumber] = useState(() => localStorage.getItem('jastip_admin_wa') || "");
+      const [isWaSetupOpen, setIsWaSetupOpen] = useState(false);
+      const [tempWaNumber, setTempWaNumber] = useState(adminWaNumber);
+
+      const [orders, setOrders] = useState(() => {
+        const saved = localStorage.getItem('jastip_orders');
+        return saved ? JSON.parse(saved) : [];
+      });
+
+      // Auto-save WA number and orders to LocalStorage
+      useEffect(() => {
+        if (!adminWaNumber) setIsWaSetupOpen(true);
+        localStorage.setItem('jastip_admin_wa', adminWaNumber);
+      }, [adminWaNumber]);
+
+      useEffect(() => {
+        localStorage.setItem('jastip_orders', JSON.stringify(orders));
+      }, [orders]);
+
+      const [formData, setFormData] = useState({ name: '', phone: '', address: '', request: '' });
+      const [isCostModalOpen, setIsCostModalOpen] = useState(false);
+      const [selectedOrder, setSelectedOrder] = useState(null);
+      const [costInput, setCostInput] = useState({ estimatedItemPrice: '', serviceFee: '' });
+
+      // ==========================================
+      // LOGIKA FUNGSI
+      // ==========================================
+
+      const handleSaveWaNumber = (e) => {
+        e.preventDefault();
+        let cleanedNumber = tempWaNumber.replace(/[^0-9]/g, '');
+        if (cleanedNumber.startsWith('0')) cleanedNumber = '62' + cleanedNumber.substring(1);
+        if (cleanedNumber.length < 10) return showAlert('Perhatian', 'Nomor WhatsApp terlalu pendek!');
+
+        setAdminWaNumber(cleanedNumber);
+        setIsWaSetupOpen(false);
+        showAlert('Berhasil', 'Nomor WhatsApp penerima order telah disimpan.');
+      };
+
+      const handleToggleModeClick = () => {
+        if (isAdminMode) {
+          setIsAdminMode(false);
+        } else {
+          setPinInput('');
+          setPinError('');
+          setIsPinModalOpen(true);
+        }
+      };
+
+      const handlePinSubmit = (e) => {
+        e.preventDefault();
+        if (pinInput === PIN_ADMIN) {
+          setIsAdminMode(true);
+          setIsPinModalOpen(false);
+        } else {
+          setPinError('PIN salah! Coba lagi.');
+          setPinInput('');
+        }
+      };
+
+      const handleCustomerSubmit = (e) => {
+        e.preventDefault();
+        if (!adminWaNumber) return showAlert('Peringatan', 'Nomor WhatsApp admin belum diatur! Harap atur terlebih dahulu di menu Admin.');
+        if (!formData.name || !formData.address || !formData.request || !formData.phone) return;
+
+        const orderId = generateId();
+
+        let message = `*PESANAN BARU - TITIP DONG!* 🛵💨\n\n`;
+        message += `*ID:* ${orderId}\n`;
+        message += `*Nama:* ${formData.name}\n`;
+        message += `*WA Pelanggan:* ${formData.phone}\n`;
+        message += `*Alamat:* ${formData.address}\n\n`;
+        message += `*🛍️ PESANAN:*\n${formData.request}\n\n`;
+        message += `Tolong info estimasi biayanya ya min.`;
+
+        const newOrder = {
+          id: orderId,
+          customerName: formData.name,
+          customerPhone: formData.phone,
+          address: formData.address,
+          request: formData.request,
+          status: "MENUNGGU",
+          estimatedItemPrice: 0,
+          serviceFee: 0,
+          date: new Date().toLocaleDateString('id-ID')
+        };
+        
+        setOrders([newOrder, ...orders]);
+        
+        const waUrl = `https://wa.me/${adminWaNumber}?text=${encodeURIComponent(message)}`;
+        window.open(waUrl, '_blank');
+
+        setFormData({ name: '', phone: '', address: '', request: '' });
+      };
+
+      const openCostModal = (order) => {
+        setSelectedOrder(order);
+        setCostInput({ estimatedItemPrice: order.estimatedItemPrice || '', serviceFee: order.serviceFee || '' });
+        setIsCostModalOpen(true);
+      };
+
+      const handleSaveCosts = (e) => {
+        e.preventDefault();
+        if (!selectedOrder) return;
+
+        const estPrice = parseInt(costInput.estimatedItemPrice) || 0;
+        const srvFee = parseInt(costInput.serviceFee) || 0;
+        const totalTagihan = estPrice + srvFee;
+
+        setOrders(orders.map(o => 
+          o.id === selectedOrder.id ? { ...o, estimatedItemPrice: estPrice, serviceFee: srvFee, status: "DIPROSES" } : o
+        ));
+        
+        let notaMsg = `*NOTA TAGIHAN - TITIP DONG!* 🧾\n\n`;
+        notaMsg += `Halo kak *${selectedOrder.customerName}*,\n`;
+        notaMsg += `Pesanan kakak (*${selectedOrder.id}*) sedang diproses.\n\n`;
+        notaMsg += `*RINCIAN BIAYA:*\n`;
+        notaMsg += `Harga Barang : ${formatRupiah(estPrice)}\n`;
+        notaMsg += `Ongkir & Jastip : ${formatRupiah(srvFee)}\n`;
+        notaMsg += `*TOTAL TAGIHAN : ${formatRupiah(totalTagihan)}*\n\n`;
+        notaMsg += `Mohon balas *OKE* jika setuju agar kurir langsung jalan! 🛵💨`;
+
+        let phoneFormat = selectedOrder.customerPhone.replace(/[^0-9]/g, '');
+        if(phoneFormat.startsWith('0')) phoneFormat = '62' + phoneFormat.substring(1);
+        
+        const waNotaUrl = `https://wa.me/${phoneFormat}?text=${encodeURIComponent(notaMsg)}`;
+        window.open(waNotaUrl, '_blank');
+
+        setIsCostModalOpen(false);
+        setSelectedOrder(null);
+      };
+
+      const updateOrderStatus = (id, newStatus) => setOrders(orders.map(o => o.id === id ? { ...o, status: newStatus } : o));
+      
+      const deleteOrder = (id) => { 
+        showConfirm('Hapus Pesanan', 'Apakah Anda yakin ingin menghapus pesanan ini secara permanen dari riwayat?', () => {
+          setOrders(orders.filter(o => o.id !== id));
+        });
+      };
+
+      const pesananSelesai = orders.filter(o => o.status === "SELESAI");
+      const totalPendapatan = pesananSelesai.reduce((sum, o) => sum + o.serviceFee, 0);
+
+      // ==========================================
+      // RENDER UI
+      // ==========================================
+      return (
+        <div className="min-h-screen pb-16">
+          <header className="bg-brand-600 text-white shadow-lg sticky top-0 z-40">
+            <div className="max-w-3xl mx-auto px-4 py-3 flex justify-between items-center">
+              <div className="flex items-center gap-2">
+                <div className="bg-white p-1.5 rounded-lg text-brand-600 shadow-sm"><Icon name="package" className="w-5 h-5" /></div>
+                <h1 className="text-xl font-bold tracking-tight">TitipDong!</h1>
+              </div>
+              
+              <div className="flex items-center gap-2">
+                <button onClick={() => { setTempWaNumber(adminWaNumber); setIsWaSetupOpen(true); }} className="p-2 bg-brand-700 hover:bg-brand-800 rounded-full transition" title="Pengaturan">
+                  <Icon name="phone" className="w-5 h-5" />
+                </button>
+
+                <button onClick={handleToggleModeClick} className="flex items-center gap-1.5 text-sm bg-brand-700/50 border border-brand-500 px-3 py-1.5 rounded-full hover:bg-brand-700 transition">
+                  <Icon name={isAdminMode ? "toggle-right" : "toggle-left"} className="w-5 h-5"/>
+                  <span className="font-semibold hidden sm:inline">{isAdminMode ? "Admin" : "Pelanggan"}</span>
+                </button>
+              </div>
+            </div>
+          </header>
+
+          <main className="max-w-3xl mx-auto px-4 py-6">
+            {!isAdminMode ? (
+              <div className="animate-fade-in max-w-md mx-auto">
+                <div className="text-center mb-6">
+                  <h2 className="text-2xl font-extrabold text-slate-800 mb-1">Pesan Jastip</h2>
+                  <p className="text-sm text-slate-500">Tuliskan pesananmu, kami akan belikan.</p>
+                </div>
+
+                <form onSubmit={handleCustomerSubmit} className="bg-white p-5 rounded-[1.5rem] shadow-sm border border-slate-100 space-y-4">
+                  <div>
+                    <label className="block text-sm font-bold text-slate-700 mb-1">Nama Pemesan</label>
+                    <input required type="text" placeholder="Cth: Budi" className="w-full bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl focus:ring-2 focus:ring-brand-500 outline-none" value={formData.name} onChange={(e) => setFormData({...formData, name: e.target.value})} />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-bold text-slate-700 mb-1">Nomor WA Anda</label>
+                    <input required type="tel" placeholder="08..." className="w-full bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl focus:ring-2 focus:ring-brand-500 outline-none" value={formData.phone} onChange={(e) => setFormData({...formData, phone: e.target.value})} />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-bold text-slate-700 mb-1">Alamat Tujuan</label>
+                    <textarea required rows="2" placeholder="Detail alamat..." className="w-full bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl focus:ring-2 focus:ring-brand-500 outline-none resize-none" value={formData.address} onChange={(e) => setFormData({...formData, address: e.target.value})}></textarea>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-bold text-slate-700 mb-1">Daftar Titipan</label>
+                    <textarea required rows="3" placeholder="Sebutkan pesanan detail..." className="w-full bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl focus:ring-2 focus:ring-brand-500 outline-none resize-none" value={formData.request} onChange={(e) => setFormData({...formData, request: e.target.value})}></textarea>
+                  </div>
+                  
+                  <button type="submit" className="w-full mt-4 bg-brand-600 text-white py-3.5 rounded-xl font-bold flex justify-center items-center gap-2 hover:bg-brand-700 transition shadow-md">
+                    Kirim Order <Icon name="send" className="w-4 h-4" />
+                  </button>
+                </form>
+              </div>
+            ) : (
+              <div className="animate-fade-in">
+                <div className="bg-white p-5 rounded-[1.5rem] shadow-sm border border-slate-100 flex items-center justify-between mb-6">
+                  <div>
+                    <p className="text-sm font-bold text-slate-500">Omset Jastip (Selesai)</p>
+                    <h3 className="text-2xl font-black text-brand-600">{formatRupiah(totalPendapatan)}</h3>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-sm font-bold text-slate-500">WA Penerima Order:</p>
+                    <p className="text-sm font-mono text-slate-800 bg-slate-100 px-2 py-1 rounded mt-1">{adminWaNumber || 'Belum Diatur'}</p>
+                  </div>
+                </div>
+
+                <div className="space-y-4">
+                  {orders.map((order) => (
+                    <div key={order.id} className="bg-white rounded-[1.25rem] shadow-sm border border-slate-100 overflow-hidden">
+                      <div className="px-4 py-2.5 border-b flex justify-between items-center bg-slate-50">
+                        <span className={`text-xs font-bold px-2.5 py-1 rounded-md ${order.status === 'MENUNGGU' ? 'bg-amber-100 text-amber-700' : order.status === 'DIPROSES' ? 'bg-brand-100 text-brand-700' : 'bg-slate-200 text-slate-600'}`}>
+                          {order.status}
+                        </span>
+                        <span className="text-xs font-mono text-slate-400">{order.id}</span>
+                      </div>
+                      
+                      <div className="p-4">
+                        <h3 className="font-bold text-slate-800 mb-1">{order.customerName} - {order.customerPhone}</h3>
+                        <p className="text-sm text-slate-600 mb-3">{order.address}</p>
+                        <div className="bg-slate-50 p-3 rounded-lg border border-slate-100 text-sm whitespace-pre-wrap">{order.request}</div>
+                        
+                        {(order.status === 'DIPROSES' || order.status === 'SELESAI') && (
+                          <div className="mt-3 pt-3 border-t text-sm font-medium flex justify-between items-center">
+                            <span className="text-slate-500">Total Tagihan:</span> 
+                            <span className="text-brand-600 font-bold text-base">{formatRupiah(order.estimatedItemPrice + order.serviceFee)}</span>
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="p-3 bg-slate-50 border-t flex gap-2">
+                        {order.status === 'MENUNGGU' && <button onClick={() => openCostModal(order)} className="flex-1 bg-brand-600 text-white py-2 rounded-lg text-sm font-bold shadow-sm">Proses & Kirim Nota</button>}
+                        {order.status === 'DIPROSES' && <button onClick={() => updateOrderStatus(order.id, 'SELESAI')} className="flex-1 bg-slate-800 text-white py-2 rounded-lg text-sm font-bold shadow-sm">Tandai Selesai</button>}
+                        <button onClick={() => deleteOrder(order.id)} className="px-4 py-2 text-slate-500 hover:text-red-600 bg-white border border-slate-200 rounded-lg text-sm font-bold transition">Hapus</button>
+                      </div>
+                    </div>
+                  ))}
+                  {orders.length === 0 && <div className="text-center py-12 text-slate-400 bg-white rounded-2xl border border-dashed border-slate-200">Belum ada pesanan masuk.</div>}
+                </div>
+              </div>
+            )}
+          </main>
+
+          {}
+          {/* CUSTOM DIALOG (PENGGANTI ALERT/CONFIRM) */}
+          {dialog.isOpen && (
+            <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fade-in">
+              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xs overflow-hidden animate-fade-in-up">
+                <div className="p-5 text-center">
+                  <div className={`mx-auto w-12 h-12 rounded-full flex items-center justify-center mb-3 ${dialog.type === 'confirm' ? 'bg-red-100 text-red-600' : 'bg-brand-100 text-brand-600'}`}>
+                    <Icon name={dialog.type === 'confirm' ? 'alert-triangle' : 'info'} className="w-6 h-6"/>
+                  </div>
+                  <h3 className="font-bold text-lg text-slate-800 mb-2">{dialog.title}</h3>
+                  <p className="text-sm text-slate-600">{dialog.message}</p>
+                </div>
+                <div className="p-3 bg-slate-50 flex gap-2">
+                  {dialog.type === 'confirm' && (
+                    <button onClick={closeDialog} className="flex-1 py-2.5 text-slate-600 font-bold bg-white border border-slate-200 rounded-xl hover:bg-slate-100">Batal</button>
+                  )}
+                  <button 
+                    onClick={() => { if(dialog.onConfirm) dialog.onConfirm(); closeDialog(); }} 
+                    className={`flex-1 py-2.5 text-white font-bold rounded-xl shadow-sm ${dialog.type === 'confirm' ? 'bg-red-600 hover:bg-red-700' : 'bg-brand-600 hover:bg-brand-700'}`}
+                  >
+                    {dialog.type === 'confirm' ? 'Hapus' : 'Mengerti'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* MODAL SETUP WA ADMIN */}
+          {isWaSetupOpen && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+              <div className="bg-white rounded-3xl shadow-xl w-full max-w-sm overflow-hidden p-6 animate-fade-in-up">
+                <div className="mx-auto w-12 h-12 bg-brand-100 text-brand-600 rounded-full flex items-center justify-center mb-4">
+                  <Icon name="phone" className="w-6 h-6"/>
+                </div>
+                <h3 className="font-bold text-center text-lg text-slate-800 mb-1">Set Nomor WA Admin</h3>
+                <p className="text-xs text-center text-slate-500 mb-5">Order dari form pelanggan akan dikirim ke WhatsApp ini.</p>
+                <form onSubmit={handleSaveWaNumber}>
+                  <input type="tel" placeholder="Contoh: 08123456789" required
+                    className="w-full border-2 border-brand-200 px-4 py-3 rounded-xl focus:border-brand-500 outline-none text-center font-bold tracking-wide"
+                    value={tempWaNumber} onChange={(e) => setTempWaNumber(e.target.value)} />
+                  <button type="submit" className="w-full mt-4 py-3 bg-brand-600 text-white font-bold rounded-xl hover:bg-brand-700">Simpan Nomor</button>
+                  {adminWaNumber && (
+                     <button type="button" onClick={() => setIsWaSetupOpen(false)} className="w-full mt-2 py-2 text-slate-500 font-bold hover:bg-slate-50 rounded-xl">Batal</button>
+                  )}
+                </form>
+              </div>
+            </div>
+          )}
+
+          {/* MODAL PIN ADMIN */}
+          {isPinModalOpen && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+              <div className="bg-white rounded-3xl shadow-xl w-full max-w-xs overflow-hidden p-6 animate-fade-in-up">
+                <h3 className="font-bold text-center text-lg mb-4">Akses Admin</h3>
+                <form onSubmit={handlePinSubmit}>
+                  <input type="password" autoFocus maxLength={6} placeholder="PIN" className="w-full text-center tracking-[0.5em] text-2xl border px-4 py-3 rounded-xl mb-2 focus:ring-2 focus:ring-brand-500 outline-none" value={pinInput} onChange={(e) => setPinInput(e.target.value)} />
+                  {pinError && <p className="text-red-500 text-xs text-center mb-2">{pinError}</p>}
+                  <p className="text-[10px] text-center mb-4 bg-slate-100 p-1 rounded font-medium text-slate-500">Hint: 123456</p>
+                  <div className="flex gap-2">
+                    <button type="button" onClick={() => setIsPinModalOpen(false)} className="flex-1 py-2 text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl font-bold transition">Batal</button>
+                    <button type="submit" className="flex-[2] py-2 bg-brand-600 text-white hover:bg-brand-700 rounded-xl font-bold shadow-md transition">Masuk</button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
+
+          {/* MODAL INPUT BIAYA NOTA */}
+          {isCostModalOpen && (
+            <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4 bg-slate-900/60 backdrop-blur-sm pb-safe">
+              <div className="bg-white rounded-t-3xl sm:rounded-3xl shadow-xl w-full max-w-sm p-6 animate-fade-in-up">
+                <h3 className="font-bold text-lg mb-4 text-slate-800">Input Biaya & Buat Nota</h3>
+                <form onSubmit={handleSaveCosts} className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 mb-1">Harga Barang (Rp)</label>
+                    <input required type="number" min="0" className="w-full border-2 border-slate-200 px-4 py-3 rounded-xl font-bold focus:border-brand-500 outline-none transition" value={costInput.estimatedItemPrice} onChange={(e) => setCostInput({...costInput, estimatedItemPrice: e.target.value})} />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 mb-1">Tarif Jastip + Ongkir (Rp)</label>
+                    <input required type="number" min="0" className="w-full border-2 border-slate-200 px-4 py-3 rounded-xl font-bold focus:border-brand-500 outline-none transition" value={costInput.serviceFee} onChange={(e) => setCostInput({...costInput, serviceFee: e.target.value})} />
+                  </div>
+                  <div className="flex gap-2 pt-3">
+                    <button type="button" onClick={() => setIsCostModalOpen(false)} className="flex-1 py-3.5 text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl font-bold transition">Batal</button>
+                    <button type="submit" className="flex-[2] py-3.5 bg-brand-600 text-white hover:bg-brand-700 rounded-xl font-bold shadow-md transition flex justify-center items-center gap-2">
+                      <Icon name="message-square" className="w-4 h-4" /> Kirim Nota WA
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    };
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
