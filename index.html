@@ -21,14 +21,12 @@
             'fade-in-up': 'fadeInUp 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards',
             'fade-in': 'fadeIn 0.2s ease-out forwards',
             'pop': 'pop 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards',
-            'spin-slow': 'spin 1.5s linear infinite',
-            'float': 'float 3s ease-in-out infinite',
+            'spin-slow': 'spin 2s linear infinite',
           },
           keyframes: {
             fadeInUp: { '0%': { opacity: '0', transform: 'translateY(20px)' }, '100%': { opacity: '1', transform: 'translateY(0)' } },
             fadeIn: { '0%': { opacity: '0' }, '100%': { opacity: '1' } },
-            pop: { '0%': { opacity: '0', transform: 'scale(0.9)' }, '100%': { opacity: '1', transform: 'scale(1)' } },
-            float: { '0%, 100%': { transform: 'translateY(0)' }, '50%': { transform: 'translateY(-10px)' } }
+            pop: { '0%': { opacity: '0', transform: 'scale(0.9)' }, '100%': { opacity: '1', transform: 'scale(1)' } }
           }
         }
       }
@@ -38,7 +36,6 @@
     body { -webkit-tap-highlight-color: transparent; background-color: #e2e8f0; font-family: 'Inter', system-ui, sans-serif; }
     #app-container { max-width: 480px; margin: 0 auto; background-color: #f8fafc; min-height: 100vh; box-shadow: 0 0 40px rgba(0,0,0,0.1); position: relative; }
     ::-webkit-scrollbar { width: 0px; background: transparent; }
-    /* Hack agar input PIN di HP memunculkan angka tapi karakternya tersembunyi */
     .pin-input { -webkit-text-security: disc; }
   </style>
 </head>
@@ -51,14 +48,10 @@
     // ==========================================
     // ⚙️ KONFIGURASI DATABASE & ADMIN
     // ==========================================
-    // 1. Paste URL Google Apps Script di sini:
     const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxaaxuAXOzjnvc8X3dCnkIop9AzV704YwKMowfs-dn_WUxPW2kUIeLOCJhJlzzQ7h0P/exec"; 
-    
-    // 2. PIN untuk masuk mode Admin
     const PIN_ADMIN = "123555";
     // ==========================================
 
-    // --- KOMPONEN ICON ANTI-CRASH ---
     const Icon = ({ name, className = "" }) => {
       const iconRef = useRef(null);
       useEffect(() => {
@@ -75,7 +68,6 @@
 
     const App = () => {
 
-      // --- DETEKSI MODE URL ---
       const urlParams = new URLSearchParams(window.location.search);
       const adminWaFromUrl = urlParams.get('admin');
       const isCustomerView = !!adminWaFromUrl;
@@ -85,17 +77,28 @@
       const [isPinModalOpen, setIsPinModalOpen] = useState(false);
       const [pinInput, setPinInput] = useState('');
       const [pinError, setPinError] = useState('');
-      const [isLoading, setIsLoading] = useState(false);
       
-      const [orders, setOrders] = useState([]);
+      const [orders, setOrders] = useState(() => {
+        const saved = localStorage.getItem('jastip_orders');
+        return saved ? JSON.parse(saved) : [];
+      });
       
+      // Auto-save local changes (Optimistic UI Backup)
+      useEffect(() => {
+        if(!isCustomerView) localStorage.setItem('jastip_orders', JSON.stringify(orders));
+      }, [orders, isCustomerView]);
+
+      // --- SYNC ENGINE STATES ---
+      const [syncStatus, setSyncStatus] = useState('idle'); // idle, syncing, error, offline
+      const [isRefreshing, setIsRefreshing] = useState(false);
+      const isSyncingRef = useRef(false);
+
       const [alertData, setAlertData] = useState({ isOpen: false, message: '', title: '' });
       const [confirmData, setConfirmData] = useState({ isOpen: false, message: '', onConfirm: null });
 
       const showAlert = (message, title = 'Informasi') => setAlertData({ isOpen: true, message, title });
       const showConfirm = (message, onConfirm) => setConfirmData({ isOpen: true, message, onConfirm });
 
-      // --- PENGATURAN WA ADMIN ---
       const [adminWaNumber, setAdminWaNumber] = useState(() => {
         if (isCustomerView) return adminWaFromUrl;
         return localStorage.getItem('jastip_admin_wa') || "";
@@ -103,57 +106,112 @@
       const [isSettingOpen, setIsSettingOpen] = useState(false);
       const [tempWaNumber, setTempWaNumber] = useState(adminWaNumber);
 
-      // --- STATE CUSTOMER PREVIEW ---
       const [formData, setFormData] = useState({ name: '', address: '', request: '' });
       const [customerPreviewData, setCustomerPreviewData] = useState(null);
 
-      // --- STATE ADMIN PREVIEW NOTA ---
       const [isCostModalOpen, setIsCostModalOpen] = useState(false);
       const [selectedOrder, setSelectedOrder] = useState(null);
       const [costInput, setCostInput] = useState({ estimatedItemPrice: '', serviceFee: '' });
       const [adminPreviewData, setAdminPreviewData] = useState(null);
 
 
-      // --- FUNGSI DATABASE (API) ---
+      // ==========================================
+      // 🚀 BACKGROUND SYNC ENGINE
+      // ==========================================
+      
+      const processSyncQueue = async () => {
+        if (!navigator.onLine) {
+          setSyncStatus('offline');
+          return;
+        }
+        if (isSyncingRef.current || GOOGLE_SCRIPT_URL.includes("PASTE_URL")) return;
+        
+        let queue = JSON.parse(localStorage.getItem('jastip_sync_queue')) || [];
+        if (queue.length === 0) {
+          setSyncStatus('idle');
+          return;
+        }
+
+        isSyncingRef.current = true;
+        setSyncStatus('syncing');
+
+        while (queue.length > 0) {
+          try {
+            const item = queue;
+            await fetch(GOOGLE_SCRIPT_URL, {
+              method: 'POST',
+              headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+              body: JSON.stringify(item.payload),
+              keepalive: true // Memastikan request tetap jalan walau tab browser mati (beralih ke WA)
+            });
+            // Hapus dari antrean jika sukses
+            queue.shift();
+            localStorage.setItem('jastip_sync_queue', JSON.stringify(queue));
+          } catch (e) {
+            setSyncStatus('error');
+            isSyncingRef.current = false;
+            return; // Berhenti jika error, coba lagi nanti
+          }
+        }
+        
+        setSyncStatus('idle');
+        isSyncingRef.current = false;
+      };
+
+      const enqueueSync = (payload) => {
+        const queue = JSON.parse(localStorage.getItem('jastip_sync_queue')) || [];
+        queue.push({ id: Date.now(), payload });
+        localStorage.setItem('jastip_sync_queue', JSON.stringify(queue));
+        processSyncQueue(); // Trigger sync di background
+      };
+
+      // Listener deteksi sinyal balik
+      useEffect(() => {
+        window.addEventListener('online', processSyncQueue);
+        window.addEventListener('offline', () => setSyncStatus('offline'));
+        return () => {
+          window.removeEventListener('online', processSyncQueue);
+          window.removeEventListener('offline', () => setSyncStatus('offline'));
+        };
+      }, []);
+
+      // Ambil data (Admin)
       const fetchOrders = async () => {
-        setIsLoading(true);
+        if (GOOGLE_SCRIPT_URL.includes("PASTE_URL") || !navigator.onLine) return;
+        setIsRefreshing(true);
         try {
           const res = await fetch(GOOGLE_SCRIPT_URL);
           const data = await res.json();
+          // Merge logic sederhana (Prioritaskan server)
           setOrders(data);
         } catch (error) {
-          showAlert("Gagal mengambil data dari server. Pastikan URL Web App Apps Script sudah benar.", "Koneksi Error");
+          console.log("Silently failed fetching updates.");
         }
-        setIsLoading(false);
+        setIsRefreshing(false);
       };
 
       useEffect(() => {
-        if (isAdminMode) fetchOrders();
+        if (isAdminMode) {
+           fetchOrders();
+           processSyncQueue(); // Jalankan antrean tertunda saat buka admin
+        }
       }, [isAdminMode]);
 
 
       // ==========================================
-      // ALUR PELANGGAN: INPUT -> PREVIEW -> KIRIM WA
+      // ALUR PELANGGAN
       // ==========================================
       
       const handleCustomerPreview = (e) => {
         e.preventDefault();
-        if (GOOGLE_SCRIPT_URL.includes("PASTE_URL")) {
-          return showAlert("Aplikasi belum di-setup oleh admin.", "Error Sistem");
-        }
-        if (!adminWaNumber) {
-          return showAlert("Error: Link toko tidak valid.", "Error Sistem");
-        }
+        if (GOOGLE_SCRIPT_URL.includes("PASTE_URL")) return showAlert("Aplikasi belum di-setup oleh admin.", "Error Sistem");
+        if (!adminWaNumber) return showAlert("Error: Link toko tidak valid.", "Error Sistem");
         if (!formData.name || !formData.address || !formData.request) return;
 
-        setCustomerPreviewData({
-          id: generateId(),
-          ...formData
-        });
+        setCustomerPreviewData({ id: generateId(), ...formData });
       };
 
-      const submitCustomerOrder = async () => {
-        setIsLoading(true);
+      const submitCustomerOrder = () => {
         const newOrder = {
           id: customerPreviewData.id,
           customerName: customerPreviewData.name,
@@ -165,44 +223,33 @@
           date: new Date().toLocaleDateString('id-ID')
         };
 
-        try {
-          await fetch(GOOGLE_SCRIPT_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-            body: JSON.stringify({ action: 'create', ...newOrder })
-          });
+        // 1. Masukkan ke Antrean Sync (Background)
+        enqueueSync({ action: 'create', ...newOrder });
 
-          let message = `*PESANAN BARU - TITIP DONG!* 🛵💨\n\n`;
-          message += `*ID:* ${newOrder.id}\n`;
-          message += `*Nama:* ${newOrder.customerName}\n`;
-          message += `*Alamat:* ${newOrder.address}\n\n`;
-          message += `*🛍️ PESANAN:*\n${newOrder.request}\n\n`;
-          message += `Mohon info estimasi biayanya ya min.`;
+        // 2. Siapkan Pesan
+        let message = `*PESANAN BARU - TITIP DONG!* 🛵💨\n\n`;
+        message += `*ID:* ${newOrder.id}\n`;
+        message += `*Nama:* ${newOrder.customerName}\n`;
+        message += `*Alamat:* ${newOrder.address}\n\n`;
+        message += `*🛍️ PESANAN:*\n${newOrder.request}\n\n`;
+        message += `Mohon info estimasi biayanya ya min.`;
 
-          setFormData({ name: '', address: '', request: '' });
-          setCustomerPreviewData(null);
-          
-          window.location.href = `https://wa.me/${adminWaNumber}?text=${encodeURIComponent(message)}`;
-
-        } catch (error) {
-          showAlert("Gagal mengirim pesanan. Silakan coba lagi.", "Error Jaringan");
-        }
-        setIsLoading(false);
+        // 3. Reset UI (Instant)
+        setFormData({ name: '', address: '', request: '' });
+        setCustomerPreviewData(null);
+        
+        // 4. Redirect ke WA Tanpa Delay (Mencegah Popup Blocker)
+        window.location.href = `https://wa.me/${adminWaNumber}?text=${encodeURIComponent(message)}`;
       };
 
 
       // ==========================================
-      // ALUR ADMIN: INPUT -> PREVIEW NOTA -> KIRIM WA
+      // ALUR ADMIN
       // ==========================================
       
       const handleToggleMode = () => {
-        if (isAdminMode) {
-           setIsAdminMode(false);
-        } else { 
-           setPinInput(''); 
-           setPinError('');
-           setIsPinModalOpen(true); 
-        }
+        if (isAdminMode) setIsAdminMode(false);
+        else { setPinInput(''); setPinError(''); setIsPinModalOpen(true); }
       };
 
       const handlePinSubmit = (e) => {
@@ -218,7 +265,7 @@
              setIsAdminMode(true);
           }
         } else {
-          setPinError('PIN yang Anda masukkan salah.');
+          setPinError("PIN yang Anda masukkan salah.");
           setPinInput('');
         }
       };
@@ -246,7 +293,7 @@
           document.execCommand('copy');
           showAlert("Link Toko berhasil disalin! Bagikan ke Bio Instagram atau WhatsApp pelanggan.", "Berhasil Disalin");
         } catch (err) {
-          showAlert("Gagal menyalin link. Salin manual: " + link);
+          showAlert("Gagal menyalin link.");
         }
         document.body.removeChild(textArea);
       };
@@ -275,80 +322,49 @@
         notaMsg += `Mohon balas *OKE* jika setuju agar kurir langsung jalan! 🛵💨`;
 
         setAdminPreviewData({
-          order: selectedOrder,
-          estPrice,
-          srvFee,
-          totalTagihan,
-          notaMsg
+          order: selectedOrder, estPrice, srvFee, totalTagihan, notaMsg
         });
 
         setIsCostModalOpen(false);
       };
 
-      const submitAdminNota = async () => {
+      const submitAdminNota = () => {
         if (!adminPreviewData) return;
-        setIsLoading(true);
 
-        try {
-          await fetch(GOOGLE_SCRIPT_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-            body: JSON.stringify({ 
-              action: 'update', 
-              id: adminPreviewData.order.id,
-              status: "DIPROSES",
-              estimatedItemPrice: adminPreviewData.estPrice,
-              serviceFee: adminPreviewData.srvFee
-            })
-          });
+        // 1. Optimistic UI Update (Langsung ganti di layar Admin)
+        setOrders(orders.map(order => 
+          order.id === adminPreviewData.order.id 
+            ? { ...order, estimatedItemPrice: adminPreviewData.estPrice, serviceFee: adminPreviewData.srvFee, status: "DIPROSES" } 
+            : order
+        ));
 
-          setOrders(orders.map(order => 
-            order.id === adminPreviewData.order.id 
-              ? { ...order, estimatedItemPrice: adminPreviewData.estPrice, serviceFee: adminPreviewData.srvFee, status: "DIPROSES" } 
-              : order
-          ));
-          
-          const notaUrl = `https://wa.me/?text=${encodeURIComponent(adminPreviewData.notaMsg)}`;
-          setAdminPreviewData(null);
-          setSelectedOrder(null);
-          
-          window.location.href = notaUrl;
-
-        } catch (error) {
-          showAlert("Gagal menyimpan harga ke server.", "Error");
-        }
-        setIsLoading(false);
+        // 2. Masukkan ke Antrean Sync
+        enqueueSync({ 
+          action: 'update', 
+          id: adminPreviewData.order.id,
+          status: "DIPROSES",
+          estimatedItemPrice: adminPreviewData.estPrice,
+          serviceFee: adminPreviewData.srvFee
+        });
+        
+        // 3. Reset Modal & Redirect (Instant)
+        const notaUrl = `https://wa.me/?text=${encodeURIComponent(adminPreviewData.notaMsg)}`;
+        setAdminPreviewData(null);
+        setSelectedOrder(null);
+        window.location.href = notaUrl;
       };
 
-      const handleCompleteOrder = async (id) => {
-        setIsLoading(true);
-        try {
-          await fetch(GOOGLE_SCRIPT_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-            body: JSON.stringify({ action: 'update', id: id, status: "SELESAI" })
-          });
-          setOrders(orders.map(o => o.id === id ? { ...o, status: "SELESAI" } : o));
-        } catch (e) {
-          showAlert("Gagal mengupdate status.", "Error");
-        }
-        setIsLoading(false);
+      const handleCompleteOrder = (id) => {
+        // Optimistic UI Update
+        setOrders(orders.map(o => o.id === id ? { ...o, status: "SELESAI" } : o));
+        enqueueSync({ action: 'update', id: id, status: "SELESAI" });
       };
 
       const handleDeleteOrder = (id) => {
-        showConfirm("Hapus pesanan ini secara permanen dari Database?", async () => {
-          setIsLoading(true);
-          try {
-            await fetch(GOOGLE_SCRIPT_URL, {
-              method: 'POST',
-              headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-              body: JSON.stringify({ action: 'delete', id: id })
-            });
-            setOrders(orders.filter(o => o.id !== id));
-          } catch (e) {
-            showAlert("Gagal menghapus data.", "Error");
-          }
-          setIsLoading(false);
+        showConfirm("Hapus pesanan ini secara permanen dari Database?", () => {
+          // Optimistic UI Update
+          setOrders(orders.filter(o => o.id !== id));
+          enqueueSync({ action: 'delete', id: id });
         });
       };
 
@@ -362,14 +378,6 @@
       // ==========================================
       return (
         <div id="app-container" className="flex flex-col relative overflow-x-hidden text-slate-800">
-          
-          {/* OVERLAY LOADING */}
-          {isLoading && (
-            <div className="absolute inset-0 z- bg-white/80 backdrop-blur-sm flex flex-col justify-center items-center">
-              <Icon name="loader-2" className="w-12 h-12 text-brand-500 animate-spin-slow mb-3 drop-shadow-md" />
-              <p className="text-brand-900 font-bold text-sm tracking-wide">Memproses...</p>
-            </div>
-          )}
 
           {/* HEADER */}
           <header className="bg-gradient-to-r from-brand-600 to-brand-500 text-white shadow-lg sticky top-0 z-30">
@@ -379,7 +387,18 @@
                   <Icon name="shopping-bag" className="w-5 h-5 text-white" />
                 </div>
                 <h1 className="text-xl font-extrabold tracking-tight">TitipDong</h1>
+                
+                {/* Indikator Background Sync */}
+                {(!isCustomerView || isCustomerView) && (
+                  <div className="ml-1 opacity-80" title="Status Sinkronisasi">
+                    {syncStatus === 'syncing' && <Icon name="refresh-cw" className="w-3.5 h-3.5 animate-spin-slow" />}
+                    {syncStatus === 'offline' && <Icon name="wifi-off" className="w-3.5 h-3.5 text-amber-300" />}
+                    {syncStatus === 'error' && <Icon name="alert-circle" className="w-3.5 h-3.5 text-red-300" />}
+                    {/* Jika idle, tidak tampil icon apa2 agar bersih */}
+                  </div>
+                )}
               </div>
+              
               {!isCustomerView && (
                 <button onClick={handleToggleMode} className="p-2.5 bg-white/10 hover:bg-white/20 rounded-full transition shadow-inner backdrop-blur-md">
                   <Icon name={isAdminMode ? "log-out" : "user"} className="w-4 h-4"/>
@@ -392,55 +411,40 @@
             
             {isCustomerView ? (
               // ==========================================
-              // TAMPILAN PELANGGAN (RE-DESIGN)
+              // TAMPILAN PELANGGAN
               // ==========================================
               <div className="animate-fade-in-up">
                 
-                {/* Hero Section Pelanggan */}
                 <div className="bg-brand-600 pb-10 pt-4 px-6 rounded-b-[2rem] shadow-md relative overflow-hidden">
-                  <div className="absolute right-[-10%] top-[-10%] opacity-10">
-                    <Icon name="shopping-cart" className="w-48 h-48" />
-                  </div>
+                  <div className="absolute right-[-10%] top-[-10%] opacity-10"><Icon name="shopping-cart" className="w-48 h-48" /></div>
                   <h2 className="text-3xl font-black text-white leading-tight mb-2 relative z-10">Pesan<br/>Jastip Sekarang.</h2>
                   <p className="text-brand-100 text-sm relative z-10 w-4/5">Tulis pesanan Anda, biar kurir kami yang belikan dan antar ke rumah!</p>
                 </div>
 
                 <div className="px-5 -mt-6 relative z-20">
                   <form onSubmit={handleCustomerPreview} className="bg-white p-6 rounded-3xl shadow-xl shadow-slate-200/50 border border-slate-100 space-y-5">
-                    
-                    {/* Input Nama */}
                     <div>
                       <label className="block text-[11px] font-bold text-slate-400 mb-1.5 uppercase tracking-widest pl-1">Nama Pemesan</label>
                       <div className="relative">
-                        <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-                          <Icon name="user" className="w-4 h-4 text-brand-500" />
-                        </div>
+                        <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none"><Icon name="user" className="w-4 h-4 text-brand-500" /></div>
                         <input required type="text" placeholder="Cth: Budi Santoso" 
                           className="w-full bg-slate-50 border border-slate-200 pl-11 pr-4 py-3.5 rounded-2xl focus:ring-2 focus:ring-brand-500 focus:bg-white outline-none font-semibold text-sm transition-all placeholder:text-slate-400" 
                           value={formData.name} onChange={(e) => setFormData({...formData, name: e.target.value})} />
                       </div>
                     </div>
-
-                    {/* Input Alamat */}
                     <div>
                       <label className="block text-[11px] font-bold text-slate-400 mb-1.5 uppercase tracking-widest pl-1">Alamat Pengantaran</label>
                       <div className="relative">
-                        <div className="absolute top-4 left-0 pl-4 flex items-center pointer-events-none">
-                          <Icon name="map-pin" className="w-4 h-4 text-brand-500" />
-                        </div>
+                        <div className="absolute top-4 left-0 pl-4 flex items-center pointer-events-none"><Icon name="map-pin" className="w-4 h-4 text-brand-500" /></div>
                         <textarea required rows="2" placeholder="Detail alamat, RT/RW, patokan..." 
                           className="w-full bg-slate-50 border border-slate-200 pl-11 pr-4 py-3.5 rounded-2xl focus:ring-2 focus:ring-brand-500 focus:bg-white outline-none font-semibold text-sm transition-all resize-none placeholder:text-slate-400" 
                           value={formData.address} onChange={(e) => setFormData({...formData, address: e.target.value})}></textarea>
                       </div>
                     </div>
-
-                    {/* Input Pesanan */}
                     <div>
                       <label className="block text-[11px] font-bold text-slate-400 mb-1.5 uppercase tracking-widest pl-1">Daftar Titipan</label>
                       <div className="relative">
-                        <div className="absolute top-4 left-0 pl-4 flex items-center pointer-events-none">
-                          <Icon name="clipboard-list" className="w-4 h-4 text-brand-500" />
-                        </div>
+                        <div className="absolute top-4 left-0 pl-4 flex items-center pointer-events-none"><Icon name="clipboard-list" className="w-4 h-4 text-brand-500" /></div>
                         <textarea required rows="3" placeholder="1. Nasi Padang ayam bakar&#10;2. Es teh manis" 
                           className="w-full bg-slate-50 border border-slate-200 pl-11 pr-4 py-3.5 rounded-2xl focus:ring-2 focus:ring-brand-500 focus:bg-white outline-none font-semibold text-sm transition-all resize-none placeholder:text-slate-400" 
                           value={formData.request} onChange={(e) => setFormData({...formData, request: e.target.value})}></textarea>
@@ -454,7 +458,6 @@
                       </button>
                     </div>
                   </form>
-                  
                   <div className="text-center mt-6 flex justify-center items-center gap-1.5 text-xs font-semibold text-slate-400">
                     <Icon name="shield-check" className="w-4 h-4"/> Transaksi Aman, Bayar Saat Barang Tiba.
                   </div>
@@ -469,7 +472,7 @@
                 </div>
                 <h2 className="text-2xl font-black text-slate-800 mb-2">Portal Admin Jastip</h2>
                 <p className="text-sm text-slate-500 mb-8 leading-relaxed">Aplikasi ini adalah dashboard operasional khusus kurir/admin. Silakan masuk untuk mengelola pesanan.</p>
-                <button onClick={() => { setPinInput(''); setIsPinModalOpen(true); }} className="px-8 py-3.5 bg-slate-800 text-white font-bold rounded-2xl shadow-lg active:scale-95 transition">
+                <button onClick={() => { setPinInput(''); setPinError(''); setIsPinModalOpen(true); }} className="px-8 py-3.5 bg-slate-800 text-white font-bold rounded-2xl shadow-lg active:scale-95 transition">
                   Login Admin
                 </button>
               </div>
@@ -487,8 +490,6 @@
                   </div>
                   <div className="flex justify-between items-start mb-1">
                     <h3 className="font-bold text-xs text-slate-300 uppercase tracking-wider relative z-10">Link Toko Jastip Anda</h3>
-                    
-                    {/* Tombol Edit Nomor WA */}
                     <button onClick={() => { setTempWaNumber(adminWaNumber); setIsSettingOpen(true); }} 
                       className="p-2 bg-slate-700 hover:bg-slate-600 rounded-xl transition relative z-10 shadow-sm" title="Ubah Nomor WA">
                       <Icon name="edit-3" className="w-3.5 h-3.5 text-brand-300"/>
@@ -522,7 +523,7 @@
                 <div className="flex justify-between items-center mb-4 px-1">
                   <h3 className="font-bold text-slate-800 flex items-center gap-2"><Icon name="database" className="w-5 h-5 text-brand-500"/> Data Pesanan</h3>
                   <button onClick={fetchOrders} className="text-xs bg-brand-50 text-brand-600 px-3 py-1.5 rounded-lg font-bold border border-brand-100 active:bg-brand-100 flex items-center gap-1.5 shadow-sm transition">
-                    <Icon name="refresh-cw" className="w-3.5 h-3.5"/> Perbarui
+                    <Icon name={isRefreshing ? "loader-2" : "refresh-cw"} className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin-slow' : ''}`}/> Perbarui
                   </button>
                 </div>
 
@@ -573,7 +574,7 @@
                       </div>
                     </div>
                   ))}
-                  {orders.length === 0 && !isLoading && (
+                  {orders.length === 0 && (
                     <div className="text-center py-16">
                       <div className="w-20 h-20 bg-white rounded-full flex items-center justify-center mx-auto mb-4 border text-slate-300 shadow-sm"><Icon name="inbox" className="w-10 h-10" /></div>
                       <p className="text-sm font-bold text-slate-500 mb-1">Database Kosong.</p>
@@ -657,7 +658,7 @@
                     Kirim WA <Icon name="share" className="w-4 h-4"/>
                   </button>
                 </div>
-                <p className="text-[10px] font-medium text-center text-slate-400 mt-3 px-4">Tindakan ini akan menyimpan data ke server & membuka fitur Send To WhatsApp.</p>
+                <p className="text-[10px] font-medium text-center text-slate-400 mt-3 px-4">Tindakan ini akan mengupdate status & membuka fitur Send To WhatsApp.</p>
               </div>
             </div>
           )}
@@ -703,7 +704,6 @@
                 <p className="text-xs font-medium text-center text-slate-400 mb-6">Masukkan PIN Keamanan</p>
                 
                 <form onSubmit={handlePinSubmit}>
-                  {/* UPDATE: inputMode="numeric" dan pattern untuk keyboard angka di HP */}
                   <input 
                     type="password" 
                     inputMode="numeric" 
