@@ -137,7 +137,7 @@
 
         while (queue.length > 0) {
           try {
-            const item = queue;
+            const item = queue[0]; // PERBAIKAN: Mengambil urutan pertama dari antrean
             await fetch(GOOGLE_SCRIPT_URL, {
               method: 'POST',
               headers: { 'Content-Type': 'text/plain;charset=utf-8' },
@@ -238,8 +238,10 @@
         setFormData({ name: '', address: '', request: '' });
         setCustomerPreviewData(null);
         
-        // 4. Redirect ke WA Tanpa Delay (Mencegah Popup Blocker)
-        window.location.href = `https://wa.me/${adminWaNumber}?text=${encodeURIComponent(message)}`;
+        // 4. PERBAIKAN: Beri jeda 300 milidetik agar pengiriman ke Database tereksekusi aman sebelum pindah ke WA
+        setTimeout(() => {
+          window.location.href = `https://wa.me/${adminWaNumber}?text=${encodeURIComponent(message)}`;
+        }, 300);
       };
 
 
@@ -351,7 +353,11 @@
         const notaUrl = `https://wa.me/?text=${encodeURIComponent(adminPreviewData.notaMsg)}`;
         setAdminPreviewData(null);
         setSelectedOrder(null);
-        window.location.href = notaUrl;
+        
+        // PERBAIKAN: Jeda aman untuk Admin sebelum pindah ke fitur Send To WA
+        setTimeout(() => {
+          window.location.href = notaUrl;
+        }, 300);
       };
 
       const handleCompleteOrder = (id) => {
