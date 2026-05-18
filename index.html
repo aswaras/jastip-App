@@ -63,8 +63,22 @@
       return <span ref={iconRef} className="inline-flex items-center justify-center shrink-0"></span>;
     };
 
+    // Helper Functions
     const formatRupiah = (number) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(number || 0);
     const generateId = () => `ORD-${Math.floor(Math.random() * 10000).toString().padStart(4, '0')}`;
+    
+    // FORMATTING RIBUAN (Membentuk 1.000.000 saat diketik)
+    const formatRibuan = (value) => {
+      if (!value) return '';
+      const numberString = value.toString().replace(/[^0-9]/g, '');
+      return numberString.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+    };
+
+    // MENGUBAH 1.000.000 menjadi angka 1000000 untuk dihitung/disimpan
+    const parseRibuan = (value) => {
+      if (!value) return 0;
+      return parseInt(value.toString().replace(/[^0-9]/g, ''), 10) || 0;
+    };
 
     const App = () => {
 
@@ -78,9 +92,10 @@
       const [isPinModalOpen, setIsPinModalOpen] = useState(false);
       const [pinInput, setPinInput] = useState('');
       const [pinError, setPinError] = useState('');
-      const [isLoading, setIsLoading] = useState(false);
       
+      const [isFetching, setIsFetching] = useState(false); // Hanya untuk icon Refresh
       const [orders, setOrders] = useState([]);
+      
       const [alertData, setAlertData] = useState({ isOpen: false, message: '', title: '' });
       const [confirmData, setConfirmData] = useState({ isOpen: false, message: '', onConfirm: null });
 
@@ -95,46 +110,51 @@
       const [isSettingOpen, setIsSettingOpen] = useState(false);
       const [tempWaNumber, setTempWaNumber] = useState(adminWaNumber);
 
-      // --- STATE CUSTOMER PREVIEW ---
+      // --- STATE CUSTOMER & MANUAL ADD ORDER ---
       const [formData, setFormData] = useState({ name: '', address: '', request: '' });
       const [customerPreviewData, setCustomerPreviewData] = useState(null);
+      const [isAddModalOpen, setIsAddModalOpen] = useState(false); // Modal tambah order manual
+      const [addFormData, setAddFormData] = useState({ name: '', address: '', request: '' });
 
       // --- STATE ADMIN PREVIEW NOTA ---
       const [isCostModalOpen, setIsCostModalOpen] = useState(false);
       const [selectedOrder, setSelectedOrder] = useState(null);
-      const [costInput, setCostInput] = useState({ estimatedItemPrice: '', serviceFee: '' });
+      const [costInput, setCostInput] = useState({ estimatedItemPrice: '', serviceFee: '' }); // Value berbentuk string (dengan titik)
       const [adminPreviewData, setAdminPreviewData] = useState(null);
 
       // --- STATE EDIT ORDER & KALKULATOR ---
       const [isEditModalOpen, setIsEditModalOpen] = useState(false);
       const [editFormData, setEditFormData] = useState({ id: '', name: '', address: '', request: '' });
       const [showCalculator, setShowCalculator] = useState(false);
-      const [calcValues, setCalcValues] = useState([{id: 1, price: ''}]);
+      const [calcValues, setCalcValues] = useState([{id: 1, price: ''}]); // price berbentuk string (dengan titik)
 
       // ==========================================
-      // FUNGSI SINKRONISASI DATABASE (NO-CORS)
+      // FUNGSI SINKRONISASI DATABASE (BACKGROUND)
       // ==========================================
       const syncToServer = (payload) => {
         if (GOOGLE_SCRIPT_URL.includes("PASTE_URL")) return;
-        fetch(GOOGLE_SCRIPT_URL, {
-          method: 'POST',
-          mode: 'no-cors', // Penting agar tidak diblokir browser
-          headers: { 'Content-Type': 'text/plain' },
-          body: JSON.stringify(payload)
-        }).catch(err => console.log("Background sync info:", err));
+        // Lempar ke server secara asinkron tanpa menunggu/mem-block layar
+        setTimeout(() => {
+          fetch(GOOGLE_SCRIPT_URL, {
+            method: 'POST',
+            mode: 'no-cors',
+            headers: { 'Content-Type': 'text/plain' },
+            body: JSON.stringify(payload)
+          }).catch(err => console.log("Background sync offline:", err));
+        }, 50);
       };
 
       const fetchOrders = async () => {
         if (GOOGLE_SCRIPT_URL.includes("PASTE_URL")) return;
-        setIsLoading(true);
+        setIsFetching(true);
         try {
           const res = await fetch(GOOGLE_SCRIPT_URL);
           const data = await res.json();
           setOrders(data);
         } catch (error) {
-          showAlert("Gagal mengambil data dari server. Pastikan URL Script benar.", "Koneksi Error");
+          showAlert("Gagal mengambil data dari server.", "Koneksi Error");
         }
-        setIsLoading(false);
+        setIsFetching(false);
       };
 
       useEffect(() => {
@@ -143,7 +163,7 @@
 
 
       // ==========================================
-      // ALUR PELANGGAN: INPUT -> PREVIEW -> WA
+      // ALUR PELANGGAN
       // ==========================================
       const handleCustomerPreview = (e) => {
         e.preventDefault();
@@ -155,7 +175,6 @@
       };
 
       const submitCustomerOrder = () => {
-        setIsLoading(true);
         const newOrder = {
           id: customerPreviewData.id,
           customerName: customerPreviewData.name,
@@ -167,7 +186,7 @@
           date: new Date().toLocaleDateString('id-ID')
         };
 
-        // 1. Kirim ke Server
+        // 1. Sync Background
         syncToServer({ action: 'create', ...newOrder });
 
         let message = `*PESANAN BARU - TITIP DONG!* 🛵💨\n\n`;
@@ -177,25 +196,22 @@
         message += `*🛍️ PESANAN:*\n${newOrder.request}\n\n`;
         message += `Mohon info estimasi biayanya ya min.`;
 
-        // 2. Beri jeda 800ms agar fetch selesai, lalu redirect ke WA
+        setFormData({ name: '', address: '', request: '' });
+        setCustomerPreviewData(null);
+        
+        // Redirect instan ke WA
         setTimeout(() => {
-          setIsLoading(false);
-          setFormData({ name: '', address: '', request: '' });
-          setCustomerPreviewData(null);
           window.location.href = `https://wa.me/${adminWaNumber}?text=${encodeURIComponent(message)}`;
-        }, 800);
+        }, 150);
       };
 
 
       // ==========================================
-      // ALUR ADMIN: LOGIN & PENGATURAN
+      // ALUR ADMIN: PENGATURAN & TAMBAH MANUAL
       // ==========================================
       const handleToggleMode = () => {
-        if (isAdminMode) {
-           setIsAdminMode(false);
-        } else { 
-           setPinInput(''); setPinError(''); setIsPinModalOpen(true); 
-        }
+        if (isAdminMode) setIsAdminMode(false);
+        else { setPinInput(''); setPinError(''); setIsPinModalOpen(true); }
       };
 
       const handlePinSubmit = (e) => {
@@ -244,6 +260,28 @@
         document.body.removeChild(textArea);
       };
 
+      // FUNGSI TAMBAH ORDER MANUAL
+      const handleManualAddOrder = (e) => {
+        e.preventDefault();
+        const newOrder = {
+          id: generateId(),
+          customerName: addFormData.name,
+          address: addFormData.address,
+          request: addFormData.request,
+          status: "MENUNGGU",
+          estimatedItemPrice: 0,
+          serviceFee: 0,
+          date: new Date().toLocaleDateString('id-ID')
+        };
+        // Optimistic update
+        setOrders([newOrder, ...orders]);
+        // Background sync
+        syncToServer({ action: 'create', ...newOrder });
+        
+        setIsAddModalOpen(false);
+        setAddFormData({ name: '', address: '', request: '' });
+      };
+
       // ==========================================
       // ALUR ADMIN: EDIT ORDER & KALKULATOR
       // ==========================================
@@ -256,20 +294,19 @@
         e.preventDefault();
         // Optimistic UI Update
         setOrders(orders.map(o => o.id === editFormData.id ? { ...o, customerName: editFormData.name, address: editFormData.address, request: editFormData.request } : o));
-        // Sync ke server
+        // Background Sync
         syncToServer({ action: 'update_details', id: editFormData.id, customerName: editFormData.name, address: editFormData.address, request: editFormData.request });
         
         setIsEditModalOpen(false);
-        showAlert("Pesanan berhasil diperbarui.", "Berhasil");
       };
 
       const addCalcRow = () => setCalcValues([...calcValues, { id: Date.now(), price: '' }]);
-      const updateCalcVal = (id, val) => setCalcValues(calcValues.map(item => item.id === id ? { ...item, price: val } : item));
+      const updateCalcVal = (id, val) => setCalcValues(calcValues.map(item => item.id === id ? { ...item, price: formatRibuan(val) } : item));
       const removeCalcRow = (id) => setCalcValues(calcValues.filter(item => item.id !== id));
       
       const applyCalculator = () => {
-        const total = calcValues.reduce((sum, item) => sum + (parseInt(item.price) || 0), 0);
-        setCostInput({ ...costInput, estimatedItemPrice: total });
+        const total = calcValues.reduce((sum, item) => sum + parseRibuan(item.price), 0);
+        setCostInput({ ...costInput, estimatedItemPrice: formatRibuan(total) });
         setShowCalculator(false);
       };
 
@@ -278,7 +315,10 @@
       // ==========================================
       const openCostModal = (order) => {
         setSelectedOrder(order);
-        setCostInput({ estimatedItemPrice: order.estimatedItemPrice || '', serviceFee: order.serviceFee || '' });
+        setCostInput({ 
+          estimatedItemPrice: order.estimatedItemPrice ? formatRibuan(order.estimatedItemPrice) : '', 
+          serviceFee: order.serviceFee ? formatRibuan(order.serviceFee) : '' 
+        });
         setIsCostModalOpen(true);
       };
 
@@ -286,8 +326,8 @@
         e.preventDefault();
         if (!selectedOrder) return;
 
-        const estPrice = parseInt(costInput.estimatedItemPrice) || 0;
-        const srvFee = parseInt(costInput.serviceFee) || 0;
+        const estPrice = parseRibuan(costInput.estimatedItemPrice);
+        const srvFee = parseRibuan(costInput.serviceFee);
         const totalTagihan = estPrice + srvFee;
 
         let notaMsg = `*NOTA TAGIHAN - TITIP DONG!* 🧾\n\n`;
@@ -305,12 +345,13 @@
 
       const submitAdminNota = () => {
         if (!adminPreviewData) return;
-        setIsLoading(true);
 
-        // Update UI
-        setOrders(orders.map(order => order.id === adminPreviewData.order.id ? { ...order, estimatedItemPrice: adminPreviewData.estPrice, serviceFee: adminPreviewData.srvFee, status: "DIPROSES" } : order));
+        // 1. Optimistic Update UI
+        setOrders(orders.map(order => 
+          order.id === adminPreviewData.order.id ? { ...order, estimatedItemPrice: adminPreviewData.estPrice, serviceFee: adminPreviewData.srvFee, status: "DIPROSES" } : order
+        ));
         
-        // Sync
+        // 2. Background Sync
         syncToServer({ 
           action: 'update', id: adminPreviewData.order.id, status: "DIPROSES",
           estimatedItemPrice: adminPreviewData.estPrice, serviceFee: adminPreviewData.srvFee
@@ -318,13 +359,13 @@
         
         const notaUrl = `https://wa.me/?text=${encodeURIComponent(adminPreviewData.notaMsg)}`;
         
-        // Jeda 800ms lalu alihkan ke WA
+        setAdminPreviewData(null);
+        setSelectedOrder(null);
+        
+        // 3. Instant Redirect WA
         setTimeout(() => {
-          setIsLoading(false);
-          setAdminPreviewData(null);
-          setSelectedOrder(null);
           window.location.href = notaUrl;
-        }, 800);
+        }, 150);
       };
 
       const handleCompleteOrder = (id) => {
@@ -350,13 +391,6 @@
       return (
         <div id="app-container" className="flex flex-col relative overflow-x-hidden text-slate-800">
           
-          {isLoading && (
-            <div className="absolute inset-0 z-[200] bg-white/80 backdrop-blur-sm flex flex-col justify-center items-center">
-              <Icon name="loader-2" className="w-12 h-12 text-brand-500 animate-spin-slow mb-3 drop-shadow-md" />
-              <p className="text-brand-900 font-bold text-sm tracking-wide">Memproses...</p>
-            </div>
-          )}
-
           <header className="bg-gradient-to-r from-brand-600 to-brand-500 text-white shadow-lg sticky top-0 z-30">
             <div className="px-6 py-4 flex justify-between items-center">
               <div className="flex items-center gap-2.5">
@@ -424,7 +458,7 @@
               </div>
 
             ) : !isAdminMode ? (
-              // --- HOMEPAGE ADMIN (BELUM LOGIN) ---
+              // HOMEPAGE ADMIN (BELUM LOGIN)
               <div className="animate-fade-in-up text-center mt-12 px-6">
                 <div className="w-24 h-24 bg-brand-50 text-brand-500 rounded-full flex items-center justify-center mx-auto mb-6 shadow-inner border border-brand-100"><Icon name="package-check" className="w-12 h-12"/></div>
                 <h2 className="text-2xl font-black text-slate-800 mb-2">Portal Admin Jastip</h2>
@@ -466,9 +500,14 @@
 
                 <div className="flex justify-between items-center mb-4 px-1">
                   <h3 className="font-bold text-slate-800 flex items-center gap-2"><Icon name="database" className="w-5 h-5 text-brand-500"/> Data Pesanan</h3>
-                  <button onClick={fetchOrders} className="text-xs bg-brand-50 text-brand-600 px-3 py-1.5 rounded-lg font-bold border border-brand-100 active:bg-brand-100 flex items-center gap-1.5 shadow-sm transition">
-                    <Icon name="refresh-cw" className="w-3.5 h-3.5"/> Perbarui
-                  </button>
+                  <div className="flex gap-2">
+                     <button onClick={() => setIsAddModalOpen(true)} className="text-xs bg-brand-600 text-white px-3 py-1.5 rounded-lg font-bold flex items-center gap-1.5 shadow-sm active:scale-95 transition">
+                      <Icon name="plus" className="w-3 h-3"/> Tambah
+                    </button>
+                    <button onClick={fetchOrders} className="text-xs bg-brand-50 text-brand-600 px-3 py-1.5 rounded-lg font-bold border border-brand-100 active:bg-brand-100 flex items-center gap-1.5 shadow-sm transition">
+                      <Icon name={isFetching ? "loader-2" : "refresh-cw"} className={`w-3.5 h-3.5 ${isFetching ? 'animate-spin-slow' : ''}`}/> Perbarui
+                    </button>
+                  </div>
                 </div>
 
                 <div className="space-y-4">
@@ -533,7 +572,7 @@
           </main>
 
           {/* ==========================================
-              MODALS PELANGGAN (PREVIEW)
+              MODAL PREVIEW PELANGGAN
           ========================================== */}
           {customerPreviewData && (
             <div className="fixed inset-0 z-[150] flex items-end sm:items-center justify-center bg-slate-900/60 backdrop-blur-sm animate-fade-in p-0 sm:p-5">
@@ -632,6 +671,37 @@
           )}
 
           {/* ==========================================
+              MODAL TAMBAH ORDER MANUAL (ADMIN)
+          ========================================== */}
+          {isAddModalOpen && (
+            <div className="fixed inset-0 z-[150] flex items-end sm:items-center justify-center bg-slate-900/60 backdrop-blur-sm animate-fade-in p-0 sm:p-5">
+              <div className="bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl w-full max-w-sm p-6 pb-10 sm:pb-6 animate-fade-in-up border-t-8 border-brand-500">
+                <div className="flex justify-between items-center mb-5">
+                  <h3 className="font-bold text-xl text-slate-800">Catat Pesanan Manual</h3>
+                  <button onClick={() => setIsAddModalOpen(false)} className="bg-slate-100 text-slate-500 p-1.5 rounded-full"><Icon name="x" className="w-4 h-4"/></button>
+                </div>
+                <form onSubmit={handleManualAddOrder} className="space-y-4">
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-400 mb-1.5 uppercase tracking-widest pl-1">Nama Pemesan</label>
+                    <input required type="text" className="w-full bg-slate-50 border border-slate-200 px-4 py-3.5 rounded-2xl font-semibold text-sm outline-none focus:ring-2 focus:ring-brand-500" value={addFormData.name} onChange={(e) => setAddFormData({...addFormData, name: e.target.value})} />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-400 mb-1.5 uppercase tracking-widest pl-1">Alamat Pengantaran</label>
+                    <textarea required rows="2" className="w-full bg-slate-50 border border-slate-200 px-4 py-3.5 rounded-2xl font-semibold text-sm outline-none focus:ring-2 focus:ring-brand-500 resize-none" value={addFormData.address} onChange={(e) => setAddFormData({...addFormData, address: e.target.value})}></textarea>
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-400 mb-1.5 uppercase tracking-widest pl-1">Daftar Titipan</label>
+                    <textarea required rows="3" className="w-full bg-slate-50 border border-slate-200 px-4 py-3.5 rounded-2xl font-semibold text-sm outline-none focus:ring-2 focus:ring-brand-500 resize-none" value={addFormData.request} onChange={(e) => setAddFormData({...addFormData, request: e.target.value})}></textarea>
+                  </div>
+                  <button type="submit" className="w-full py-4 bg-brand-600 text-white rounded-2xl font-bold flex justify-center items-center gap-2 active:scale-95 transition shadow-lg mt-2">
+                    Tambahkan ke Antrean <Icon name="plus" className="w-4 h-4"/>
+                  </button>
+                </form>
+              </div>
+            </div>
+          )}
+
+          {/* ==========================================
               MODAL INPUT BIAYA & KALKULATOR (ADMIN)
           ========================================== */}
           {isCostModalOpen && (
@@ -657,7 +727,9 @@
                       {calcValues.map((item, idx) => (
                          <div key={item.id} className="flex items-center gap-2">
                             <span className="text-sm font-bold text-slate-400 w-4">{idx+1}.</span>
-                            <input type="number" min="0" placeholder="Harga..." className="flex-1 bg-white border border-slate-200 px-3 py-2.5 rounded-xl text-sm font-bold outline-none focus:ring-2 focus:ring-brand-500" value={item.price} onChange={(e) => updateCalcVal(item.id, e.target.value)} />
+                            <input type="text" inputMode="numeric" placeholder="Harga..." 
+                              className="flex-1 bg-white border border-slate-200 px-3 py-2.5 rounded-xl text-sm font-bold outline-none focus:ring-2 focus:ring-brand-500" 
+                              value={item.price} onChange={(e) => updateCalcVal(item.id, e.target.value)} />
                             <button type="button" onClick={() => removeCalcRow(item.id)} className="p-2 text-red-400 hover:bg-red-50 rounded-xl transition"><Icon name="x" className="w-4 h-4"/></button>
                          </div>
                       ))}
@@ -665,7 +737,7 @@
                          <Icon name="plus" className="w-3 h-3"/> Tambah Baris
                       </button>
                       <div className="pt-4 border-t border-slate-200 flex justify-between items-center mt-2">
-                         <span className="text-sm font-black text-slate-700">Total: {formatRupiah(calcValues.reduce((sum, item) => sum + (parseInt(item.price) || 0), 0))}</span>
+                         <span className="text-sm font-black text-slate-700">Total: {formatRupiah(calcValues.reduce((sum, item) => sum + parseRibuan(item.price), 0))}</span>
                          <button type="button" onClick={applyCalculator} className="bg-slate-800 text-white text-[11px] font-bold px-3 py-2 rounded-xl hover:bg-slate-900 transition active:scale-95">Gunakan Total</button>
                       </div>
                    </div>
@@ -676,18 +748,19 @@
                     <label className="block text-[11px] font-bold text-slate-400 mb-1.5 uppercase tracking-widest pl-1">Harga Barang (Estimasi)</label>
                     <div className="relative">
                       <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 font-bold">Rp</span>
-                      <input required type="number" min="0" placeholder="0" 
+                      {/* Input type TEXT agar bisa menerima titik ribuan */}
+                      <input required type="text" inputMode="numeric" placeholder="0" 
                         className="w-full bg-slate-50 border border-slate-200 pl-12 pr-4 py-3.5 rounded-2xl font-black text-lg outline-none focus:ring-2 focus:ring-slate-800 transition-all placeholder:font-medium" 
-                        value={costInput.estimatedItemPrice} onChange={(e) => setCostInput({...costInput, estimatedItemPrice: e.target.value})} />
+                        value={costInput.estimatedItemPrice} onChange={(e) => setCostInput({...costInput, estimatedItemPrice: formatRibuan(e.target.value)})} />
                     </div>
                   </div>
                   <div>
                     <label className="block text-[11px] font-bold text-slate-400 mb-1.5 uppercase tracking-widest pl-1">Ongkos Kirim + Jastip</label>
                     <div className="relative">
                       <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 font-bold">Rp</span>
-                      <input required type="number" min="0" placeholder="0" 
+                      <input required type="text" inputMode="numeric" placeholder="0" 
                         className="w-full bg-slate-50 border border-slate-200 pl-12 pr-4 py-3.5 rounded-2xl font-black text-lg outline-none focus:ring-2 focus:ring-slate-800 transition-all placeholder:font-medium" 
-                        value={costInput.serviceFee} onChange={(e) => setCostInput({...costInput, serviceFee: e.target.value})} />
+                        value={costInput.serviceFee} onChange={(e) => setCostInput({...costInput, serviceFee: formatRibuan(e.target.value)})} />
                     </div>
                   </div>
                   
